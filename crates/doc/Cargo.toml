@@ -1,0 +1,19 @@
+[package]
+name = "e6-doc"
+description = "Board document: Loro-backed CRDT scene store (pure core)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+e6-scene.workspace = true
+loro.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+image.workspace = true

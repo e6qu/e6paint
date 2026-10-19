@@ -1,0 +1,17 @@
+{
+  "name": "e6paint",
+  "version": "1.0.0",
+  "description": "*A canvas-first, multiplayer, deeply-zoomable whiteboard where code-drawn diagrams are first-class citizens.* Rust core, compiled to WebAssembly. Clean-sheet successor to [mermollusc](https://github.com/e6qu/mermollusc).",
+  "main": "index.js",
+  "scripts": {
+    "test:e2e": "cargo build -p e6-relay && PLAYWRIGHT_BROWSERS_PATH=$PWD/.playwright-browsers playwright test",
+    "pw:install": "PLAYWRIGHT_BROWSERS_PATH=$PWD/.playwright-browsers playwright install chromium"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@playwright/test": "^1.64.1"
+  }
+}

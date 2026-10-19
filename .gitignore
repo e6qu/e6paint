@@ -1,0 +1,17 @@
+# Reference material (read-only, not part of e6paint)
+/reference/
+
+# Rust
+/target/
+
+# Node / Playwright e2e
+/node_modules/
+/.playwright-browsers/
+/test-results/
+/playwright-report/
+
+# Trunk build output
+/crates/app/dist/
+
+# OS
+.DS_Store

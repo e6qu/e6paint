@@ -1,0 +1,17 @@
+[package]
+name = "e6-scene"
+description = "Scene model: elements, geometry, camera, spatial index (pure core)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+proptest.workspace = true

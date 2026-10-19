@@ -1,0 +1,102 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/scene",
+    "crates/doc",
+    "crates/dsl",
+    "crates/layout",
+    "crates/render",
+    "crates/editor",
+    "crates/collab",
+    "crates/ui",
+    "crates/app",
+    "crates/relay",
+]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.98"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/e6qu/e6paint"
+authors = ["e6qu"]
+
+[workspace.dependencies]
+# Benchmarks (render display-list over the torture board).
+criterion = "0.8"
+# Internal crates, DAG order (DESIGN §4): scene <- {doc, dsl, layout, render, editor, collab} <- {ui} <- app
+e6-scene = { path = "crates/scene" }
+e6-doc = { path = "crates/doc" }
+e6-dsl = { path = "crates/dsl" }
+e6-layout = { path = "crates/layout" }
+e6-render = { path = "crates/render" }
+e6-editor = { path = "crates/editor" }
+e6-collab = { path = "crates/collab" }
+e6-ui = { path = "crates/ui" }
+
+# Aligned on one wgpu major (DESIGN D9/R2): eframe 0.37 (egui-wgpu) and vello 0.11 both require wgpu ^30.
+eframe = "0.37"
+egui = "0.37"
+vello = "0.11"
+wgpu = "30"
+
+axum = { version = "0.8", features = ["ws", "macros"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+dirs = "6"
+js-sys = "0.3"
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
+
+# Relay persistence + realtime (M5): bundled SQLite needs no system libs.
+rusqlite = { version = "0.37", features = ["bundled"] }
+uuid = { version = "1", features = ["v4"] }
+proptest = "1"
+web-time = "1"
+tokio-tungstenite = "0.28"
+futures-util = "0.3"
+
+# CRDT document store (DESIGN D5): one LoroDoc per board.
+loro = "1.16"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+# PNG export: SVG rasterization (pure Rust, wasm-compatible).
+resvg = "0.48"
+
+log = "0.4"
+env_logger = "0.11"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = [
+    "BinaryType",
+    "Blob",
+    "BlobPropertyBag",
+    "Clipboard",
+    "Document",
+    "Element",
+    "FileSystemDirectoryHandle",
+    "FileSystemFileHandle",
+    "FileSystemGetFileOptions",
+    "FileSystemWritableFileStream",
+    "HtmlAnchorElement",
+    "MessageEvent",
+    "Request",
+    "RequestInit",
+    "Response",
+    "StorageManager",
+    "Url",
+    "WebSocket",
+    "Window",
+] }
+console_error_panic_hook = "0.1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"

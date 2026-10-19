@@ -1,0 +1,25 @@
+[package]
+name = "e6-render"
+description = "Scene -> cached Vello display list, LOD, culling, SVG export (pure core)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+e6-scene.workspace = true
+vello.workspace = true
+resvg.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+criterion = "0.8"
+
+[[bench]]
+name = "display_list"
+harness = false

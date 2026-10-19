@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc b2dbae2d020ec5019c00d4b48a89171ad1dc57e0f91079c9d7c7eab0bcfe9e65 # shrinks to src = "seq \"Q\" {\nAnimal <|-- Dog\n}\n"
+cc 23a6a70ec33a7b5317663c5528f1365ed537ff3bc41003f2c5ee903baed99966 # shrinks to src = "mind \"M\" {\ndirection: TD\n}\n"

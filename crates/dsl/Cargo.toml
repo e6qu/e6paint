@@ -1,0 +1,19 @@
+[package]
+name = "e6-dsl"
+description = "Native mol DSL: lexer, parser, printer, Mermaid/DOT importers (pure core)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+e6-scene.workspace = true
+e6-layout.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

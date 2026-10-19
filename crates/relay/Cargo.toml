@@ -1,0 +1,30 @@
+[package]
+name = "e6-relay"
+description = "e6paint collaboration relay: WS rooms, token auth, snapshot persistence (server)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+axum = { workspace = true, features = ["ws"] }
+tokio.workspace = true
+loro.workspace = true
+rusqlite.workspace = true
+uuid.workspace = true
+log.workspace = true
+env_logger.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+futures-util.workspace = true
+
+[dev-dependencies]
+tower.workspace = true
+http-body-util.workspace = true
+tokio-tungstenite.workspace = true
+futures-util.workspace = true

@@ -1,0 +1,15 @@
+[package]
+name = "e6-editor"
+description = "Tools state machine, selection, gesture application (pure core)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+e6-scene.workspace = true

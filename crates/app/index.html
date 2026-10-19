@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+
+<head>
+    <title>e6paint</title>
+
+    <link data-trunk rel="rust" data-wasm-opt="2" />
+    <base data-trunk-public-url />
+
+    <style>
+        html {
+            touch-action: manipulation;
+        }
+
+        html,
+        body {
+            overflow: hidden;
+            margin: 0 !important;
+            padding: 0 !important;
+            height: 100%;
+            width: 100%;
+        }
+
+        body {
+            background: #17171e;
+        }
+
+        canvas {
+            display: block;
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- The WASM code resizes the canvas dynamically; the id is hardcoded in main.rs. -->
+    <canvas id="e6paint_canvas"></canvas>
+</body>
+
+</html>

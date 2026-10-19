@@ -1,0 +1,15 @@
+[package]
+name = "e6-layout"
+description = "Pure layout engines: layered, tree, lane, grid, chart, orthogonal router"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+e6-scene.workspace = true
