@@ -6,6 +6,8 @@
 use e6_editor::Tool;
 use e6_scene::{Camera, Element, ElementId, ElementKind};
 
+pub mod icons;
+
 /// Commands from the right-hand panels (library + layers).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PanelAction {
@@ -188,19 +190,45 @@ pub fn tool_for_digit(digit: u8) -> Option<Tool> {
     TOOLS.get(usize::from(digit) - 1).map(|(tool, _)| *tool)
 }
 
+/// The tool rail: one column of icon buttons on the left edge, Miro-style. Each
+/// button shows its name and digit hotkey on hover; the active tool is filled.
 pub fn draw_tool_bar(ui: &mut egui::Ui, active: Tool) -> Option<Tool> {
     let mut picked = None;
-    egui::Panel::left("e6_tool_bar").show(ui, |bar| {
-        bar.vertical(|bar| {
-            for (index, (tool, label)) in TOOLS.iter().enumerate() {
-                let response = bar.selectable_label(active == *tool, *label);
-                if response.clicked() {
-                    picked = Some(*tool);
+    egui::Panel::left("e6_tool_bar")
+        .exact_size(52.0)
+        .resizable(false)
+        .frame(
+            egui::Frame::new()
+                .fill(egui::Color32::from_rgb(24, 24, 32))
+                .inner_margin(egui::Margin::symmetric(0, 8)),
+        )
+        .show(ui, |bar| {
+            bar.vertical(|bar| {
+                bar.add_space(4.0);
+                for (index, (tool, label)) in TOOLS.iter().enumerate() {
+                    let (rect, response) =
+                        bar.allocate_exact_size(egui::Vec2::splat(38.0), egui::Sense::click());
+                    let is_active = active == *tool;
+                    if is_active {
+                        bar.painter()
+                            .rect_filled(rect, 6.0, egui::Color32::from_rgb(52, 52, 72));
+                    } else if response.hovered() {
+                        bar.painter()
+                            .rect_filled(rect, 6.0, egui::Color32::from_rgb(38, 38, 52));
+                    }
+                    let icon_color = if is_active {
+                        egui::Color32::from_rgb(235, 235, 250)
+                    } else {
+                        egui::Color32::from_rgb(170, 170, 190)
+                    };
+                    icons::tool_icon(bar.painter(), rect, *tool, icon_color);
+                    if response.clicked() {
+                        picked = Some(*tool);
+                    }
+                    response.on_hover_text(format!("{label} — {}", index + 1));
                 }
-                response.on_hover_text(format!("{}", index + 1));
-            }
+            });
         });
-    });
     picked
 }
 

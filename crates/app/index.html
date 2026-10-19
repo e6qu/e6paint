@@ -40,6 +40,16 @@
 <body>
     <!-- The WASM code resizes the canvas dynamically; the id is hardcoded in main.rs. -->
     <canvas id="e6paint_canvas"></canvas>
+    <div id="e6paint_gpu_note" hidden
+        style="position:fixed;inset:auto 16px 16px 16px;color:#d9a441;font:14px/1.5 system-ui,sans-serif;">
+        This browser does not expose WebGPU — e6paint renders through WebGPU and will not
+        start here. Try a current Chrome, Edge, or Safari 26+.
+    </div>
+    <script>
+        if (!("gpu" in navigator)) {
+            document.getElementById("e6paint_gpu_note").hidden = false;
+        }
+    </script>
 </body>
 
 </html>

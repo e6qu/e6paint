@@ -242,6 +242,15 @@ pub struct E6App {
     file_closure: Option<wasm_bindgen::closure::Closure<dyn FnMut()>>,
 }
 
+/// Pointer position in canvas-local physical pixels: the camera's screen space
+/// starts at the canvas rect's top-left, which sits inside the egui panels. Every
+/// pointer→world conversion must go through this, or selections and clicks land
+/// offset by the panel footprint.
+fn canvas_pos(response: &egui::Response, pos: egui::Pos2, pixels_per_point: f32) -> Point {
+    let local = pos - response.rect.min;
+    Point::new(local.x * pixels_per_point, local.y * pixels_per_point)
+}
+
 impl E6App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Result<Self, String> {
         // eframe paints through wgpu only (glow is not enabled), so a missing render
@@ -1517,9 +1526,10 @@ impl E6App {
         #[cfg(target_arch = "wasm32")]
         if response.hovered()
             && let Some(pos) = response.hover_pos()
-            && let Some(world) = Some(self.camera.screen_to_world(Point::new(
-                pos.x * pixels_per_point,
-                pos.y * pixels_per_point,
+            && let Some(world) = Some(self.camera.screen_to_world(canvas_pos(
+                response,
+                pos,
+                pixels_per_point,
             )))
             && self.collab.is_some()
         {
@@ -1535,7 +1545,7 @@ impl E6App {
         });
         let pointer = response
             .hover_pos()
-            .map(|pos| Point::new(pos.x * pixels_per_point, pos.y * pixels_per_point));
+            .map(|pos| canvas_pos(response, pos, pixels_per_point));
 
         let wheel_zoom = zoom_delta != 1.0 || (zoom_modifier && scroll.y != 0.0);
         if wheel_zoom {
@@ -1593,7 +1603,7 @@ impl E6App {
     fn world_at(&self, response: &egui::Response, pixels_per_point: f32) -> Option<Point> {
         response
             .interact_pointer_pos()
-            .map(|pos| Point::new(pos.x * pixels_per_point, pos.y * pixels_per_point))
+            .map(|pos| canvas_pos(response, pos, pixels_per_point))
             .map(|screen| self.camera.screen_to_world(screen))
     }
 
@@ -2049,10 +2059,15 @@ impl E6App {
         }
         let scale =
             (box_w / bounds.size().width.max(1.0)).min(box_h / bounds.size().height.max(1.0));
+        // Center the fitted content inside the box, Miro-style.
+        let offset = egui::Vec2::new(
+            (box_w - bounds.size().width * scale) / 2.0,
+            (box_h - bounds.size().height * scale) / 2.0,
+        );
         let to_map = |point: Point| {
             egui::Pos2::new(
-                map_rect.left() + (point.x - bounds.min.x) * scale,
-                map_rect.top() + (point.y - bounds.min.y) * scale,
+                map_rect.left() + offset.x + (point.x - bounds.min.x) * scale,
+                map_rect.top() + offset.y + (point.y - bounds.min.y) * scale,
             )
         };
 
@@ -2092,8 +2107,8 @@ impl E6App {
             && let Some(pos) = response.interact_pointer_pos()
         {
             let world = Point::new(
-                bounds.min.x + (pos.x - map_rect.left()) / scale,
-                bounds.min.y + (pos.y - map_rect.top()) / scale,
+                bounds.min.x + (pos.x - map_rect.left() - offset.x) / scale,
+                bounds.min.y + (pos.y - map_rect.top() - offset.y) / scale,
             );
             let viewport_size = Size::new(
                 available.width() * pixels_per_point,

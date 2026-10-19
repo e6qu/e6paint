@@ -31,16 +31,11 @@ jobs:
       - name: Build web app
         # Project pages serve under /e6paint/: the public URL must match so the
         # hashed asset references resolve.
-        run: trunk build --release --public-url /e6paint/app/
+        run: trunk build --release --public-url /e6paint/
         working-directory: crates/app
-      - name: Assemble site (landing page + embedded app)
-        run: |
-          mkdir -p site/app
-          cp -r crates/app/dist/* site/app/
-          cp pages/index.html site/index.html
-      - name: Upload Pages artifact
+      - name: Deploy (the canvas is the page)
         uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: crates/app/dist
       - id: deployment
         uses: actions/deploy-pages@v4
