@@ -7,6 +7,9 @@ first-class citizens.* Rust core, compiled to WebAssembly. Clean-sheet successor
 **Architecture & decisions:** [DESIGN.md](DESIGN.md) · **Operating contract:** [AGENTS.md](AGENTS.md)
 · **License:** AGPL-3.0-or-later
 
+**Try it in your browser:** [e6qu.github.io/e6paint](https://e6qu.github.io/e6paint/) —
+live build, embedded on a landing page (WebGPU required).
+
 ## Status — M0 ✅ · M1 scene core ✅ · M2 whiteboard kit ✅ · M3 deep zoom ✅ · M4 DSL waves 1–3 ✅ · M5 multiplayer ✅ · M6 closeout ✅ · M7 exports + share links ✅ · M8 hardening ✅ → **v1.0**
 
 A pan/zoom infinite canvas through **eframe + egui + Vello**, building for native and

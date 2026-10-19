@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>e6paint — code-drawn diagrams on an infinite canvas</title>
+<style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+        margin: 0;
+        background: #17171e;
+        color: #e8e8f5;
+        font: 16px/1.6 system-ui, -apple-system, sans-serif;
+    }
+    header { max-width: 1100px; margin: 0 auto; padding: 44px 24px 20px; }
+    h1 { font-size: 2.1rem; margin: 0 0 6px; letter-spacing: 0.5px; }
+    .tagline { color: #9a9ab0; margin: 0 0 10px; }
+    .links a { color: #8ab4ff; text-decoration: none; margin-right: 18px; }
+    .links a:hover { text-decoration: underline; }
+    .note { color: #d9a441; margin: 10px 0 0; }
+    .note[hidden] { display: none; }
+    main { max-width: 1240px; margin: 0 auto; padding: 8px 24px 40px; }
+    .frame {
+        border: 1px solid #2a2a38;
+        border-radius: 12px;
+        overflow: hidden;
+        background: #101016;
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+    }
+    .frame iframe {
+        display: block;
+        width: 100%;
+        height: min(76vh, 780px);
+        border: 0;
+        background: #17171e;
+    }
+    .hint { color: #9a9ab0; font-size: 0.9rem; margin-top: 12px; }
+    .hint code { color: #c9c9dd; }
+    footer {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 0 24px 44px;
+        color: #6f6f85;
+        font-size: 0.9rem;
+    }
+    footer a { color: #8ab4ff; }
+</style>
+</head>
+<body>
+<header>
+    <h1>e6paint</h1>
+    <p class="tagline">A canvas-first, multiplayer, deeply-zoomable whiteboard where
+    code-drawn diagrams are first-class citizens.</p>
+    <p class="links">
+        <a href="https://github.com/e6qu/e6paint">Source (AGPL-3.0-or-later)</a>
+        <a href="app/">Open full-screen</a>
+        <a href="https://github.com/e6qu/e6paint/blob/main/DESIGN.md">Design</a>
+    </p>
+    <p class="note" id="gpu-note" hidden>
+        This browser does not expose WebGPU — e6paint renders through WebGPU and will
+        not start here. Try a current Chrome, Edge, or Safari 26+.
+    </p>
+</header>
+<main>
+    <div class="frame">
+        <iframe id="app" src="app/" title="e6paint, embedded"></iframe>
+    </div>
+    <p class="hint">
+        Live build, embedded. Draw with the tool bar (digits 1–9 switch tools), double the
+        fun with <code>?relay=https://your-relay:8480</code> in the address bar to point at
+        a relay and share room links from the app's Share button. Your board autosaves in
+        this browser.
+    </p>
+</main>
+<footer>
+    Copyright (c) 2026 Adrian Mârza and e6paint contributors — AGPL-3.0-or-later.
+</footer>
+<script>
+    if (!("gpu" in navigator)) {
+        document.getElementById("gpu-note").hidden = false;
+    }
+</script>
+</body>
+</html>
