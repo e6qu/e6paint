@@ -44,7 +44,7 @@ jobs:
             echo "::error::wasm is $gz bytes gzipped; budget is $limit"
             exit 1
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: e6paint-web
           path: crates/app/dist
