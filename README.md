@@ -1,5 +1,7 @@
 # e6paint
 
+[![CI](https://github.com/e6qu/e6paint/actions/workflows/ci.yml/badge.svg)](https://github.com/e6qu/e6paint/actions/workflows/ci.yml)
+
 *A canvas-first, multiplayer, deeply-zoomable whiteboard where code-drawn diagrams are
 first-class citizens.* Rust core, compiled to WebAssembly. Clean-sheet successor to
 [mermollusc](https://github.com/e6qu/mermollusc).
