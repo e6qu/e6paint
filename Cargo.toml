@@ -53,7 +53,7 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
 proptest = "1"
 web-time = "1"
-tokio-tungstenite = "0.28"
+tokio-tungstenite = "0.29"
 futures-util = "0.3"
 
 # CRDT document store (DESIGN D5): one LoroDoc per board.
