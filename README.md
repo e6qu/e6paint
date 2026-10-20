@@ -63,11 +63,13 @@ npm run pw:install  # once: Chromium for e2e (downloads into ./.playwright-brows
 npm run test:e2e    # Playwright e2e against the live wasm app (boots trunk serve)
 ```
 
-**Controls:** tool bar (Select · Pan · Pen · Rect · Ellipse · Arrow · Text · Sticky ·
+**Controls:** tool rail (Select · Pan · Pen · Rect · Ellipse · Arrow · Text · Sticky ·
 Frame; digits **1–9** pick tools in that order) ·
 wheel = pan · pinch or cmd/ctrl+wheel = zoom at pointer · drag empty canvas = marquee ·
+space+drag = pan on any tool · double-click text/sticky = edit ·
 shift-click = add/remove from selection · drag selection = move (groups move together) ·
-Delete = remove · Esc = cancel · cmd/ctrl+Z undo (+shift/Y redo). The action bar has
+Delete = remove · Esc = cancel · cmd/ctrl+Z undo (+shift/Y redo) ·
+cmd/ctrl+Enter = expand the mol panel · cmd/ctrl+E = export SVG (+shift = PNG). The action bar has
 Align/Distribute, Group/Ungroup, Lock/Unlock, Sketch toggle, Front/Back, Undo/Redo,
 Reset, and Export JSON.
 

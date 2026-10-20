@@ -1499,6 +1499,18 @@ impl E6App {
             return;
         }
 
+        // cmd/ctrl+E exports SVG; add shift for PNG. Exports must not fire while
+        // a text field owns the keyboard.
+        if modifier && ctx.input(|input| input.key_pressed(egui::Key::E)) {
+            let command = if shift {
+                HudCommand::ExportPng
+            } else {
+                HudCommand::ExportSvg
+            };
+            self.run_hud_command(command);
+            return;
+        }
+
         if modifier && z {
             if shift {
                 if let Err(err) = self.doc.redo() {
