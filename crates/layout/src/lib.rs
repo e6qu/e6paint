@@ -90,6 +90,9 @@ pub enum LayoutError {
     DuplicateNode { key: u64 },
     /// An edge references an undeclared node key.
     UnknownEdgeEndpoint { edge: usize, key: u64 },
+    /// A node has more than one parent — only valid for tree layouts when the
+    /// graph is a forest.
+    MultipleParents { key: u64 },
 }
 
 impl std::fmt::Display for LayoutError {
@@ -99,6 +102,9 @@ impl std::fmt::Display for LayoutError {
             Self::DuplicateNode { key } => write!(f, "duplicate node key {key}"),
             Self::UnknownEdgeEndpoint { edge, key } => {
                 write!(f, "edge {edge} references undeclared node key {key}")
+            }
+            Self::MultipleParents { key } => {
+                write!(f, "node {key} has more than one parent in a tree layout")
             }
         }
     }

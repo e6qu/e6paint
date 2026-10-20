@@ -1494,6 +1494,54 @@ mod tests {
         Ok(())
     }
 
+    /// Concurrent moves of the same element converge to ONE position on both
+    /// peers (per-field last-writer-wins, DESIGN §9) — no divergence, no
+    /// duplicated or ghost geometry.
+    #[test]
+    fn concurrent_moves_converge_identically() -> Result<(), Box<dyn std::error::Error>> {
+        const SIZE: Size = Size::new(50.0, 40.0);
+        let alice = BoardDoc::new();
+        let bob = BoardDoc::new();
+
+        alice.insert_element(&spec(0.0, 0.0, ElementKind::Rect))?;
+        alice.commit();
+        bob.apply_remote(&alice.full_updates()?)?;
+
+        // Both peers move the SAME element to different places, concurrently.
+        let target = bob.elements()[0].id;
+        alice.set_geometry(target, Aabb::from_min_size(Point::new(100.0, 0.0), SIZE))?;
+        alice.commit();
+        bob.set_geometry(target, Aabb::from_min_size(Point::new(0.0, 100.0), SIZE))?;
+        bob.commit();
+
+        // Full bidirectional exchange.
+        alice.apply_remote(&bob.full_updates()?)?;
+        bob.apply_remote(&alice.full_updates()?)?;
+
+        let alice_bounds = alice
+            .elements()
+            .iter()
+            .find(|e| e.id == target)
+            .map(|e| e.bounds)
+            .ok_or("element vanished on alice")?;
+        let bob_bounds = bob
+            .elements()
+            .iter()
+            .find(|e| e.id == target)
+            .map(|e| e.bounds)
+            .ok_or("element vanished on bob")?;
+        assert_eq!(
+            alice_bounds, bob_bounds,
+            "concurrent moves must converge to one position"
+        );
+        assert_ne!(
+            alice_bounds,
+            Aabb::from_min_size(Point::new(0.0, 0.0), SIZE),
+            "convergence must pick a written position, not the untouched start"
+        );
+        Ok(())
+    }
+
     #[test]
     fn corrupt_kind_is_a_loud_error() -> Result<(), Box<dyn std::error::Error>> {
         let board = BoardDoc::new();

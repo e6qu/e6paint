@@ -7,7 +7,9 @@
 //! - all coordinates are finite,
 //! - the layout is deterministic (same input, same output).
 
-use e6_layout::{GridLayout, LayeredLayout, LayoutGraph, LayoutOutput, LayoutProvider, charts};
+use e6_layout::{
+    GridLayout, LayeredLayout, LayoutGraph, LayoutOutput, LayoutProvider, TreeLayout, charts,
+};
 use proptest::prelude::*;
 
 fn graph_strategy() -> BoxedStrategy<LayoutGraph> {
@@ -55,6 +57,38 @@ fn check_output(graph: &LayoutGraph, out: &LayoutOutput) {
     }
 }
 
+/// A forest: keys are ordered so every edge points strictly forward, which makes
+/// the graph acyclic by construction (parent always precedes child).
+fn tree_graph_strategy() -> BoxedStrategy<LayoutGraph> {
+    (2usize..14)
+        .prop_flat_map(|count| {
+            let sizes = proptest::collection::vec((10.0_f64..200.0, 10.0_f64..200.0), count);
+            let edges = proptest::collection::vec(
+                (0usize..count, 0usize..count),
+                0..count.saturating_sub(1),
+            );
+            (Just(count), sizes, edges)
+        })
+        .prop_filter(
+            "tree edges must point strictly forward (parent precedes child)",
+            |(count, _, edges)| edges.iter().all(|(from, to)| from < to && *to < *count),
+        )
+        .prop_map(|(count, sizes, edges)| {
+            let mut graph = LayoutGraph::default();
+            for (key, (w, h)) in (0..count as u64).zip(sizes.iter()) {
+                graph = graph.node(key, e6_scene::Size::new(*w as f32, *h as f32));
+            }
+            for (from, to) in edges {
+                graph.edges.push(e6_layout::LayoutEdge {
+                    from: from as u64,
+                    to: to as u64,
+                });
+            }
+            graph
+        })
+        .boxed()
+}
+
 proptest! {
     #[test]
     fn layered_layout_is_total_and_deterministic(graph in graph_strategy()) {
@@ -79,6 +113,27 @@ proptest! {
         check_output(&graph, &first);
         let second = engine.layout(&graph)?;
         prop_assert_eq!(first.positions, second.positions);
+    }
+
+    #[test]
+    fn tree_layout_is_total_and_deterministic(graph in tree_graph_strategy()) {
+        let engine = TreeLayout {
+            node_size: e6_scene::Size::new(140.0, 50.0),
+            gap: e6_scene::Size::new(30.0, 30.0),
+        };
+        // Forests lay out totally and deterministically; multi-parent graphs are
+        // rejected loudly instead of duplicating nodes.
+        match engine.layout(&graph) {
+            Ok(first) => {
+                check_output(&graph, &first);
+                let second = engine.layout(&graph)?;
+                prop_assert_eq!(first.positions, second.positions, "tree layout is not deterministic");
+            }
+            Err(e6_layout::LayoutError::MultipleParents { .. }) => {}
+            Err(err) => {
+                prop_assert!(false, "unexpected layout error: {err:?}");
+            }
+        }
     }
 
     #[test]

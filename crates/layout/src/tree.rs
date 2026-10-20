@@ -27,8 +27,12 @@ impl LayoutProvider for TreeLayout {
         let mut children: HashMap<u64, Vec<u64>> = HashMap::new();
         let mut has_parent: HashSet<u64> = HashSet::new();
         for edge in &graph.edges {
+            // A tree layout duplicates multi-parent nodes (each parent would lay
+            // the child out again); rejecting is the loud contract.
+            if !has_parent.insert(edge.to) {
+                return Err(LayoutError::MultipleParents { key: edge.to });
+            }
             children.entry(edge.from).or_default().push(edge.to);
-            has_parent.insert(edge.to);
         }
 
         let step_x = self.node_size.width + self.gap.width;

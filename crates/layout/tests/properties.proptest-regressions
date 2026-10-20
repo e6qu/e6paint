@@ -6,3 +6,4 @@
 # everyone who runs the test benefits from these saved cases.
 cc 940c89d7dadb1f1c23a08dc89afe6491b19010f46609860f8220e64961d20c07 # shrinks to graph = LayoutGraph { nodes: [LayoutNode { key: 0, size: Size { width: 10.0, height: 10.0 } }], edges: [LayoutEdge { from: 0, to: 1 }] }
 cc a6a222e42174c7840197243809113db79382c56934beeeebd7c8652a82749ed9 # shrinks to graph = LayoutGraph { nodes: [LayoutNode { key: 0, size: Size { width: 10.0, height: 10.0 } }], edges: [LayoutEdge { from: 0, to: 1 }] }
+cc 70f7a238026c7e9ae7e2ca0274cc3aafddc89ed41283d9e0470fc60a79dfb18b # shrinks to graph = LayoutGraph { nodes: [LayoutNode { key: 0, size: Size { width: 10.0, height: 10.0 } }, LayoutNode { key: 1, size: Size { width: 10.0, height: 10.0 } }, LayoutNode { key: 2, size: Size { width: 10.0, height: 10.0 } }, LayoutNode { key: 3, size: Size { width: 10.0, height: 10.0 } }], edges: [LayoutEdge { from: 1, to: 2 }, LayoutEdge { from: 1, to: 2 }] }
