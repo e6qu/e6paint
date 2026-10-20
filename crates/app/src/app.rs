@@ -247,7 +247,11 @@ pub struct E6App {
 /// pointer→world conversion must go through this, or selections and clicks land
 /// offset by the panel footprint.
 fn canvas_pos(response: &egui::Response, pos: egui::Pos2, pixels_per_point: f32) -> Point {
-    let local = pos - response.rect.min;
+    canvas_pos_in(response.rect, pos, pixels_per_point)
+}
+
+fn canvas_pos_in(rect: egui::Rect, pos: egui::Pos2, pixels_per_point: f32) -> Point {
+    let local = pos - rect.min;
     Point::new(local.x * pixels_per_point, local.y * pixels_per_point)
 }
 
@@ -1563,8 +1567,7 @@ impl E6App {
             ));
         }
 
-        let pans_on_drag =
-            self.tool == Tool::Pan || (self.tool == Tool::Select && self.drag.is_none());
+        let pans_on_drag = self.tool == Tool::Pan || self.space_held(response);
         if pans_on_drag && self.draft.is_none() && response.dragged() {
             let drag = response.drag_delta();
             self.camera.pan_by(Point::new(
@@ -1600,6 +1603,12 @@ impl E6App {
         }
     }
 
+    /// Select gestures are suppressed while space is held: space+drag pans (the
+    /// Miro convention), regardless of the active tool.
+    fn space_held(&self, response: &egui::Response) -> bool {
+        response.ctx.input(|input| input.key_down(egui::Key::Space))
+    }
+
     fn world_at(&self, response: &egui::Response, pixels_per_point: f32) -> Option<Point> {
         response
             .interact_pointer_pos()
@@ -1610,6 +1619,11 @@ impl E6App {
     /// Dispatch the active tool's gesture. `select` moves elements; creation tools build
     /// a draft and commit it as one element.
     fn handle_canvas_gesture(&mut self, response: &egui::Response, pixels_per_point: f32) {
+        // Space+drag pans (handle_camera_input); placement/selection gestures yield.
+        if self.space_held(response) {
+            response.ctx.set_cursor_icon(egui::CursorIcon::Grab);
+            return;
+        }
         match self.tool {
             Tool::Select => self.select_gesture(response, pixels_per_point),
             Tool::Pan => {}
@@ -1625,6 +1639,20 @@ impl E6App {
 
     fn select_gesture(&mut self, response: &egui::Response, pixels_per_point: f32) {
         let shift = response.ctx.input(|input| input.modifiers.shift);
+        if self.space_held(response) {
+            // Space+drag belongs to panning (handled in handle_camera_input).
+            return;
+        }
+        // Double-click on a text-bearing element reopens its inline editor.
+        if response.double_clicked()
+            && let Some(world) = self.world_at(response, pixels_per_point)
+            && let Some(element) = self.topmost_at(world)
+            && matches!(element.kind, ElementKind::Text | ElementKind::Sticky)
+        {
+            self.selection.set([element.id]);
+            self.editing = Some(element.id);
+            return;
+        }
         if response.drag_started()
             && let Some(press_world) = self.world_at(response, pixels_per_point)
         {
@@ -2329,5 +2357,20 @@ impl eframe::App for E6App {
         self.draw_text_editor(ui.ctx(), pixels_per_point);
 
         ui.ctx().request_repaint();
+    }
+}
+
+#[cfg(test)]
+mod canvas_pos_tests {
+    use super::*;
+
+    /// Regression: pointer math used absolute egui coordinates, displacing every
+    /// selection by the panel footprint (the canvas rect starts inside panels).
+    #[test]
+    fn canvas_pos_is_rect_relative_physical() {
+        let rect =
+            egui::Rect::from_min_size(egui::Pos2::new(52.0, 0.0), egui::Vec2::new(800.0, 600.0));
+        let world_screen = canvas_pos_in(rect, egui::Pos2::new(600.0, 300.0), 2.0);
+        assert_eq!(world_screen, Point::new((600.0 - 52.0) * 2.0, 300.0 * 2.0));
     }
 }
