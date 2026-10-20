@@ -1,0 +1,12 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    # AGENTS supply-chain rule: new versions need review; Dependabot proposes,
+    # humans merge.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
