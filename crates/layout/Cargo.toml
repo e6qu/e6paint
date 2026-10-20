@@ -13,3 +13,6 @@ workspace = true
 
 [dependencies]
 e6-scene.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

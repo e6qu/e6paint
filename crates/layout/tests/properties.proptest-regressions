@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 940c89d7dadb1f1c23a08dc89afe6491b19010f46609860f8220e64961d20c07 # shrinks to graph = LayoutGraph { nodes: [LayoutNode { key: 0, size: Size { width: 10.0, height: 10.0 } }], edges: [LayoutEdge { from: 0, to: 1 }] }
+cc a6a222e42174c7840197243809113db79382c56934beeeebd7c8652a82749ed9 # shrinks to graph = LayoutGraph { nodes: [LayoutNode { key: 0, size: Size { width: 10.0, height: 10.0 } }], edges: [LayoutEdge { from: 0, to: 1 }] }

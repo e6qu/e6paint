@@ -50,6 +50,7 @@ impl SpatialIndex for NaiveIndex {
 mod tests {
     use super::*;
     use crate::geom::{Point, Size};
+    use proptest::prelude::*;
 
     fn box_at(x: f32, y: f32) -> Aabb {
         Aabb::from_min_size(Point::new(x, y), Size::new(10.0, 10.0))
@@ -57,6 +58,58 @@ mod tests {
 
     fn id(raw: u64) -> ElementId {
         ElementId::from_raw(raw)
+    }
+
+    proptest! {
+        /// Containment soundness: a query over a stored rect always returns its
+        /// id, and a removed id never returns. Raw ids derive from the position
+        /// index, so they are unique by construction.
+        #[test]
+        fn query_is_sound_for_arbitrary_rects(
+            positions in proptest::collection::vec(
+                (-50.0_f64..450.0, -50.0_f64..450.0),
+                1..25,
+            ),
+            probe_index in 0usize..25,
+            remove_probe in proptest::bool::ANY,
+        ) {
+            let mut index = NaiveIndex::new();
+            let mut specs: Vec<(ElementId, Aabb)> = Vec::new();
+            for (position_index, (x, y)) in positions.iter().enumerate() {
+                specs.push((
+                    ElementId::from_raw(position_index as u64),
+                    Aabb::from_min_size(
+                        Point::new(*x as f32, *y as f32),
+                        Size::new(40.0, 40.0),
+                    ),
+                ));
+            }
+            for (element_id, bounds) in &specs {
+                index.insert(*element_id, *bounds);
+            }
+
+            let probe = &specs[probe_index % specs.len()];
+            let probe_id = probe.0;
+            let center = probe.1.center();
+            let query_region = Aabb::from_min_size(
+                Point::new(center.x - 1.0, center.y - 1.0),
+                Size::new(2.0, 2.0),
+            );
+            prop_assert!(index.query(query_region).contains(&probe_id));
+
+            if remove_probe {
+                index.remove(probe_id);
+                prop_assert!(!index.query(query_region).contains(&probe_id));
+            } else {
+                // Removing everything else must not disturb the probe.
+                for (element_id, _) in &specs {
+                    if *element_id != probe_id {
+                        index.remove(*element_id);
+                    }
+                }
+                prop_assert!(index.query(query_region).contains(&probe_id));
+            }
+        }
     }
 
     #[test]
