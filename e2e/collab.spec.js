@@ -21,6 +21,14 @@ function relayLogMentions(fragment) {
   }
 }
 
+function relayLogCount(fragment) {
+  try {
+    return fs.readFileSync(RELAY_LOG, "utf8").split(fragment).length - 1;
+  } catch {
+    return 0;
+  }
+}
+
 test("share-link peers join, an edit syncs, and the room persists", async ({
   page,
   context,
@@ -116,6 +124,31 @@ test("share-link peers join, an edit syncs, and the room persists", async ({
   expect(
     consoleB.filter((t) => t.startsWith("error:") || t.includes("panicked")),
     `page B console problems: ${consoleB.join(" | ")}`
+  ).toEqual([]);
+
+  // Image insert: drive the hidden file input with a tiny PNG. The wasm image
+  // decoder, the insert, and the batch to the relay are all under test.
+  const batchesBeforeImage = relayLogCount("batch from");
+  const tinyPng = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64"
+  );
+  await page.setInputFiles("#e6_file_input", {
+    name: "dot.png",
+    mimeType: "image/png",
+    buffer: tinyPng,
+  });
+  await expect
+    .poll(() => relayLogCount("batch from") > batchesBeforeImage, {
+      timeout: 20_000,
+      intervals: [500, 1_000, 2_000],
+    })
+    .toBe(true);
+  expect(
+    consoleA.filter(
+      (t) => t.includes("image insert failed") || t.includes("decode")
+    ),
+    "image insert failed"
   ).toEqual([]);
 
   // A view-only token joins fine, but its edits never reach the room.
