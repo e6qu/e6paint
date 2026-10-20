@@ -12,6 +12,7 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+web-time.workspace = true
 egui.workspace = true
 e6-editor.workspace = true
 e6-scene.workspace = true

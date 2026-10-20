@@ -288,6 +288,8 @@ impl E6App {
                 total_elements: 0,
                 selected_elements: 0,
                 frame_ms: 0.0,
+                notice: None,
+                notice_until: None,
             },
             last_frame: None,
             painted_once: false,
@@ -355,6 +357,7 @@ impl E6App {
             Self::relay_base_override(&search).unwrap_or(RELAY_HTTP_BASE.to_owned());
         if let Some(link) = e6_collab::parse_share_query(&search) {
             log::info!("share link detected; joining room {}", link.room);
+            self.notify("joining room...");
             self.join_flow = Some(crate::collab_ws::JoinFlow::connect_to(
                 &self.relay_http_base,
                 &link.room,
@@ -1173,6 +1176,7 @@ impl E6App {
     #[cfg(target_arch = "wasm32")]
     fn start_share(&mut self) {
         self.collab = None;
+        self.notify("creating room...");
         self.join_flow = Some(crate::collab_ws::JoinFlow::start(
             self.relay_http_base.as_str(),
         ));
@@ -1258,6 +1262,7 @@ impl E6App {
                     };
                     if let Err(err) = transport.send(frame) {
                         log::error!("sync push failed: {err}");
+                        self.notify("sync failed; retrying...");
                         return false;
                     }
                 }
@@ -1270,10 +1275,21 @@ impl E6App {
         }
     }
 
+    /// Surface a transient message in the HUD (the console is not enough — a user
+    /// clicking Share must not watch a silent button).
+    #[cfg(target_arch = "wasm32")]
+    fn notify(&mut self, message: impl Into<String>) {
+        self.hud.notice = Some(message.into());
+        self.hud.notice_until = Some(Instant::now() + Duration::from_secs(8));
+    }
+
     /// Apply one inbound socket event.
     #[cfg(target_arch = "wasm32")]
     fn handle_ws_event(&mut self, event: crate::collab_ws::WsEvent) {
         match event {
+            crate::collab_ws::WsEvent::Failed(message) => {
+                self.notify(format!("share failed: {message}"));
+            }
             crate::collab_ws::WsEvent::Open => {}
             crate::collab_ws::WsEvent::Frame(bytes) => {
                 let Some((tag, payload)) = frame::unwrap(&bytes) else {
@@ -1453,6 +1469,16 @@ impl E6App {
         // editor or the mol code panel) owns the keyboard: its Delete, cmd/ctrl+Z/Y
         // and digits must edit text, never the board.
         let keyboard_busy = ctx.egui_wants_keyboard_input();
+
+        // cmd/ctrl+Enter expands the mol panel — the standard "render the source"
+        // gesture for diagram tools. It works even while typing in the panel, so
+        // this check sits above the keyboard_busy guard; canvas text editing is
+        // left via Escape first anyway.
+        if modifier && ctx.input(|input| input.key_pressed(egui::Key::Enter)) {
+            self.expand_mol();
+            return;
+        }
+
         if keyboard_busy {
             return;
         }
@@ -2238,6 +2264,7 @@ impl eframe::App for E6App {
             && let Some(transport) = flow.take_transport()
         {
             log::info!("collab session joined");
+            self.notify("connected to the room");
             self.build_session(transport);
         }
         #[cfg(target_arch = "wasm32")]
@@ -2266,6 +2293,12 @@ impl eframe::App for E6App {
             // Persist + sync local changes: autosave (local sessions only -
             // room-first content belongs to the room), then the room batch.
             // `dirty` clears only after both succeeded; flush failures re-flag.
+            if let Some(until) = self.hud.notice_until
+                && Instant::now() >= until
+            {
+                self.hud.notice = None;
+                self.hud.notice_until = None;
+            }
             if self.dirty {
                 if !self.room_first {
                     self.autosave();

@@ -107,7 +107,7 @@ pub fn draw_layers_panel(
 }
 
 /// What the status HUD shows.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct HudState {
     /// Camera zoom as screen pixels per world unit.
     pub zoom: f32,
@@ -116,6 +116,10 @@ pub struct HudState {
     pub selected_elements: usize,
     /// Exponential moving average of frame time, milliseconds.
     pub frame_ms: f32,
+    /// Transient user-facing message (share/sync/export failures, join progress);
+    /// shown until `notice_until`, then cleared. `None` shows the plain status.
+    pub notice: Option<String>,
+    pub notice_until: Option<web_time::Instant>,
 }
 
 /// Button availability in the action bar.
@@ -242,7 +246,12 @@ pub fn draw_bottom_bar(
     let mut command = HudCommand::None;
     egui::Panel::bottom("e6_status_hud").show(ui, |bar| {
         bar.horizontal(|bar| {
-            bar.label(format_status(state));
+            match &state.notice {
+                Some(notice) if state.notice_until.is_some() => {
+                    bar.colored_label(egui::Color32::from_rgb(235, 195, 120), notice)
+                }
+                _ => bar.label(format_status(state)),
+            };
             bar.with_layout(egui::Layout::right_to_left(egui::Align::Center), |bar| {
                 if bar
                     .add_enabled(availability.can_redo, egui::Button::new("Redo"))
@@ -430,6 +439,8 @@ mod tests {
     #[test]
     fn status_line_mentions_zoom_visibility_selection_and_frametime() {
         let line = format_status(&HudState {
+            notice: None,
+            notice_until: None,
             zoom: 1.5,
             visible_elements: 42,
             total_elements: 2500,

@@ -1452,6 +1452,7 @@ dependencies = [
  "e6-editor",
  "e6-scene",
  "egui",
+ "web-time",
 ]
 
 [[package]]

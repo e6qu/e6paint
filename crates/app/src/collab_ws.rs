@@ -31,6 +31,8 @@ pub enum WsEvent {
     /// Tagged binary frame (relay protocol).
     Frame(Vec<u8>),
     Closed,
+    /// The join flow failed before a socket existed (room creation, connect).
+    Failed(String),
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -86,15 +88,39 @@ impl JoinFlow {
                                     }
                                     *ready.borrow_mut() = Some(transport);
                                 }
-                                Err(err) => log::error!("socket connect failed: {err}"),
+                                Err(err) => {
+                                    let message = format!("socket connect failed: {err}");
+                                    log::error!("{message}");
+                                    if let Ok(mut slot) = events.lock() {
+                                        slot.push(WsEvent::Failed(message));
+                                    }
+                                }
                             }
                         }
-                        Err(err) => log::error!("room creation failed: {err}"),
+                        Err(err) => {
+                            let message = format!("room creation failed: {err}");
+                            log::error!("{message}");
+                            if let Ok(mut slot) = events.lock() {
+                                slot.push(WsEvent::Failed(message));
+                            }
+                        }
                     }
                 });
             }
-            (None, _) => log::error!("no window; sharing is unavailable"),
-            (_, Err(err)) => log::error!("room request build failed: {err:?}"),
+            (None, _) => {
+                let message = "no window; sharing is unavailable".to_owned();
+                log::error!("{message}");
+                if let Ok(mut slot) = events.lock() {
+                    slot.push(WsEvent::Failed(message));
+                }
+            }
+            (_, Err(err)) => {
+                let message = format!("room request build failed: {err:?}");
+                log::error!("{message}");
+                if let Ok(mut slot) = events.lock() {
+                    slot.push(WsEvent::Failed(message));
+                }
+            }
         }
 
         Self {
@@ -127,7 +153,13 @@ impl JoinFlow {
             Ok(transport) => {
                 *ready.borrow_mut() = Some(transport);
             }
-            Err(err) => log::error!("socket connect failed: {err}"),
+            Err(err) => {
+                let message = format!("socket connect failed: {err}");
+                log::error!("{message}");
+                if let Ok(mut slot) = events.lock() {
+                    slot.push(WsEvent::Failed(message));
+                }
+            }
         }
 
         Self {
