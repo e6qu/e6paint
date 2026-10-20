@@ -2436,6 +2436,20 @@ impl eframe::App for E6App {
         response.widget_info(|| {
             egui::WidgetInfo::labeled(egui::Role::Canvas, true, "e6paint board canvas")
         });
+        // Tool-appropriate cursor (Miro convention); space+drag overrides to grab
+        // inside handle_canvas_gesture.
+        response.ctx.set_cursor_icon(match self.tool {
+            Tool::Select => egui::CursorIcon::Default,
+            Tool::Pan => egui::CursorIcon::Grab,
+            Tool::Text => egui::CursorIcon::Text,
+            Tool::Pen
+            | Tool::Rect
+            | Tool::Ellipse
+            | Tool::Connector
+            | Tool::Sticky
+            | Tool::Frame => egui::CursorIcon::Crosshair,
+            Tool::Image => egui::CursorIcon::Default,
+        });
         let rect = response.rect;
         // A canvas press ends text editing (the click itself is consumed by the editor
         // area, which sits above the canvas).

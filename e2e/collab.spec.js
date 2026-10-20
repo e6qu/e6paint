@@ -151,6 +151,26 @@ test("share-link peers join, an edit syncs, and the room persists", async ({
     "image insert failed"
   ).toEqual([]);
 
+  // A places a text element and types; every set_text batch must reach B.
+  const appliedBeforeText = consoleB.filter((t) =>
+    t.includes("remote board update applied")
+  ).length;
+  await page.keyboard.press("7");
+  await page.waitForTimeout(300);
+  await page.mouse.click(cx + 120, cy - 60);
+  await page.waitForTimeout(700);
+  await page.keyboard.type("shared note", { delay: 40 });
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(500);
+  await expect
+    .poll(
+      () =>
+        consoleB.filter((t) => t.includes("remote board update applied"))
+          .length > appliedBeforeText,
+      { timeout: 30_000, intervals: [500, 1_000, 2_000, 5_000] }
+    )
+    .toBe(true);
+
   // A view-only token joins fine, but its edits never reach the room.
   const c = await context.newPage();
   const consoleC = collector(c);
