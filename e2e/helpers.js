@@ -1,6 +1,10 @@
 // Shared e2e helpers.
 
+const os = require("os");
 const { expect } = require("@playwright/test");
+
+/// The platform modifier key (cmd on macOS, ctrl elsewhere).
+const modKey = os.platform() === "darwin" ? "Meta" : "Control";
 
 /**
  * Wait until the app announces its first painted frame ("first frame painted"
@@ -25,4 +29,4 @@ function collector(page) {
   return lines;
 }
 
-module.exports = { waitPainted, collector };
+module.exports = { waitPainted, collector, modKey };

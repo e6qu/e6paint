@@ -361,19 +361,7 @@ impl BoardDoc {
         if target == current {
             return Ok(false);
         }
-        let element = self.element_container(&id_key(id))?;
-        match target.as_deref() {
-            Some(key) => element.insert("frame", key)?,
-            None => element.delete("frame")?,
-        }
-        self.state
-            .lock()
-            .map(|mut state| {
-                if let Some(slot) = state.elements.iter_mut().find(|e| e.id == id) {
-                    slot.frame = target;
-                }
-            })
-            .map_err(|_| DocError::Corrupt("state mutex poisoned".into()))?;
+        self.set_frame_tag(id, target.as_deref())?;
         Ok(true)
     }
 
@@ -622,6 +610,22 @@ impl BoardDoc {
 
     /// Remove an element and its paint-order entry. No commit.
     pub fn remove_element(&self, id: ElementId) -> Result<(), DocError> {
+        // Removing a frame detaches its members: their tags would otherwise
+        // reference a frame that no longer exists — ghost state that would
+        // persist through snapshots.
+        if self
+            .state
+            .lock()
+            .map_err(|_| DocError::Corrupt("state mutex poisoned".into()))?
+            .elements
+            .iter()
+            .find(|e| e.id == id)
+            .is_some_and(|e| e.kind == ElementKind::Frame)
+        {
+            for member in self.frame_members(id) {
+                self.set_frame_tag(member, None)?;
+            }
+        }
         let key = id_key(id);
         let zorder = self.doc.get_movable_list("zorder");
         let index = self.zorder_index(&key)?;
@@ -630,6 +634,25 @@ impl BoardDoc {
         self.state
             .lock()
             .map(|mut state| state.elements.retain(|e| e.id != id))
+            .map_err(|_| DocError::Corrupt("state mutex poisoned".into()))?;
+        Ok(())
+    }
+
+    /// Set (or clear) an element's frame membership tag, keeping the read model
+    /// in step with the Loro container.
+    fn set_frame_tag(&self, id: ElementId, frame: Option<&str>) -> Result<(), DocError> {
+        let element = self.element_container(&id_key(id))?;
+        match frame {
+            Some(key) => element.insert("frame", key)?,
+            None => element.delete("frame")?,
+        }
+        self.state
+            .lock()
+            .map(|mut state| {
+                if let Some(slot) = state.elements.iter_mut().find(|e| e.id == id) {
+                    slot.frame = frame.map(|key| key.to_owned());
+                }
+            })
             .map_err(|_| DocError::Corrupt("state mutex poisoned".into()))?;
         Ok(())
     }
@@ -1452,6 +1475,52 @@ mod tests {
         board.reattach_to_frame(inside)?;
         board.commit();
         assert_eq!(board.frame_members(frame), vec![inside]);
+        Ok(())
+    }
+
+    #[test]
+    fn removing_a_frame_detaches_its_members() -> Result<(), Box<dyn std::error::Error>> {
+        let board = BoardDoc::new();
+        let frame_spec = ElementSpec::simple(
+            ElementKind::Frame,
+            Aabb::from_min_size(Point::new(0.0, 0.0), Size::new(200.0, 200.0)),
+            0x0000_0000,
+        )
+        .with_text("Board".into(), 20.0);
+        let frame = board.insert_element(&frame_spec)?;
+        let inside_a = board.insert_element(&spec(50.0, 50.0, ElementKind::Sticky))?;
+        let inside_b = board.insert_element(&spec(80.0, 80.0, ElementKind::Text))?;
+        board.commit();
+        assert_eq!(board.frame_members(frame).len(), 2);
+
+        board.remove_element(frame)?;
+        board.commit();
+
+        // Members survive as loose elements with no ghost frame tag...
+        let members = board.elements();
+        assert!(members.iter().any(|e| e.id == inside_a));
+        assert!(members.iter().any(|e| e.id == inside_b));
+        assert!(
+            members.iter().all(|e| e.frame.is_none() || e.id == frame),
+            "a member still references the removed frame"
+        );
+        assert!(board.frame_members(frame).is_empty());
+
+        // ...and the detached state survives snapshots.
+        let restored = BoardDoc::from_snapshot(&board.snapshot()?)?;
+        assert!(
+            restored
+                .elements()
+                .iter()
+                .filter(|e| e.id != frame)
+                .all(|e| e.frame.is_none()),
+            "restored members still reference the removed frame"
+        );
+
+        // Undo restores the frame AND the membership tags together.
+        board.undo()?;
+        assert_eq!(board.frame_members(frame).len(), 2);
+        assert!(board.elements().iter().any(|e| e.id == frame));
         Ok(())
     }
 

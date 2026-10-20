@@ -412,7 +412,9 @@ impl E6App {
         }
 
         let inbox = self.pending_image.clone();
+        log::info!("DIAG file picker: change handler armed");
         let closure = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
+            log::info!("DIAG file picker: change fired");
             let files = web_sys::window()
                 .and_then(|window| window.document())
                 .and_then(|document| document.get_element_by_id("e6_file_input"))
@@ -422,8 +424,51 @@ impl E6App {
             let Some(file) = files else { return };
             let inbox = inbox.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                match wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await {
+                // Blob::array_buffer()'s promise has been observed to never
+                // settle in this setup; FileReader's event pipeline is the
+                // reliable read path.
+                let reader = web_sys::FileReader::new()
+                    .map_err(|err| log::error!("FileReader creation failed: {err:?}"));
+                let Ok(reader) = reader else { return };
+                let reader = std::rc::Rc::new(reader);
+                let buffer: js_sys::Promise = js_sys::Promise::new(
+                    &mut |resolve: js_sys::Function, reject: js_sys::Function| {
+                        let reader_for_load = reader.clone();
+                        let reject_for_error = reject.clone();
+                        let reject_for_load = reject.clone();
+                        let onload =
+                            wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
+                                // FileReader::result() yields Result<JsValue, JsValue>;
+                                // on `load` it is Ok(ArrayBuffer-as-JsValue).
+                                match reader_for_load.result() {
+                                    Ok(buffer) => {
+                                        let _ =
+                                            resolve.call1(&wasm_bindgen::JsValue::NULL, &buffer);
+                                    }
+                                    Err(err) => {
+                                        let _ = reject_for_load.call0(&wasm_bindgen::JsValue::NULL);
+                                        log::error!("FileReader result error: {err:?}");
+                                    }
+                                }
+                            });
+                        reader.set_onload(Some(onload.as_ref().unchecked_ref()));
+                        // The closure owns a reader clone for as long as the
+                        // browser holds the handler.
+                        std::mem::forget(onload);
+                        let onerror =
+                            wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
+                                let _ = reject_for_error.call0(&wasm_bindgen::JsValue::NULL);
+                            });
+                        reader.set_onerror(Some(onerror.as_ref().unchecked_ref()));
+                        std::mem::forget(onerror);
+                        if let Err(err) = reader.read_as_array_buffer(&file) {
+                            log::error!("FileReader read failed: {err:?}");
+                        }
+                    },
+                );
+                match wasm_bindgen_futures::JsFuture::from(buffer).await {
                     Ok(buffer) => {
+                        log::info!("file picker: bytes read");
                         let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
                         if let Ok(mut slot) = inbox.lock() {
                             *slot = Some(bytes);
@@ -477,6 +522,9 @@ impl E6App {
                 self.dirty = true;
                 self.selection.set([id]);
                 self.tool = Tool::Select;
+                // The file picker took focus; shortcuts live on the canvas.
+                #[cfg(target_arch = "wasm32")]
+                self.refocus_canvas();
             }
             Err(err) => log::error!("image insert failed: {err}"),
         }
@@ -678,16 +726,22 @@ impl E6App {
         // which silently kills every canvas-bound keyboard shortcut (keydown is
         // bound on the canvas). Hand focus back explicitly.
         #[cfg(target_arch = "wasm32")]
+        self.refocus_canvas();
+    }
+
+    /// Hand DOM focus back to the canvas. Keyboard events are bound on the
+    /// canvas, so anything that steals focus (the IME agent, the file input)
+    /// must return it or every shortcut silently dies.
+    #[cfg(target_arch = "wasm32")]
+    fn refocus_canvas(&self) {
+        use wasm_bindgen::JsCast;
+        if let Some(canvas) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.get_element_by_id("e6paint_canvas"))
         {
-            use wasm_bindgen::JsCast;
-            if let Some(canvas) = web_sys::window()
-                .and_then(|window| window.document())
-                .and_then(|document| document.get_element_by_id("e6paint_canvas"))
-            {
-                let _ = canvas.set_attribute("tabindex", "0");
-                if let Ok(element) = canvas.dyn_into::<web_sys::HtmlElement>() {
-                    let _ = element.focus();
-                }
+            let _ = canvas.set_attribute("tabindex", "0");
+            if let Ok(element) = canvas.dyn_into::<web_sys::HtmlElement>() {
+                let _ = element.focus();
             }
         }
     }
@@ -1580,7 +1634,9 @@ impl E6App {
 
         // Digits 1–9 pick tools in tool-bar order (the bar shows the digit on hover).
         // keyboard_busy is already excluded above; the editing guard keeps the
-        // shortcut inert even if the editor ever loses focus mid-edit.
+        // shortcut inert even if the editor ever loses focus mid-edit. Reads
+        // per-event state (see key_pressed_with_modifiers) — the global queue is
+        // cleared by text-agent focus churn on room-first pages.
         if self.editing.is_none() {
             const DIGIT_KEYS: [egui::Key; 9] = [
                 egui::Key::Num1,
@@ -1594,8 +1650,9 @@ impl E6App {
                 egui::Key::Num9,
             ];
             for (index, key) in DIGIT_KEYS.iter().enumerate() {
-                let pressed = ctx.input(|input| input.key_pressed(*key));
-                if pressed && let Some(tool) = e6_ui::tool_for_digit(index as u8 + 1) {
+                if Self::key_pressed_with_modifiers(ctx, *key).is_some()
+                    && let Some(tool) = e6_ui::tool_for_digit(index as u8 + 1)
+                {
                     self.apply_tool(tool);
                 }
             }
@@ -1605,6 +1662,7 @@ impl E6App {
     /// Switch tools the way a tool-bar click does: leave text editing, drop any
     /// in-flight draft and marquee.
     fn apply_tool(&mut self, tool: Tool) {
+        #[cfg(target_arch = "wasm32")]
         self.end_editing();
         self.draft = None;
         self.marquee = None;
