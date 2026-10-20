@@ -844,5 +844,6 @@ pub fn export_png(elements: &[Element], title: &str, scale: u32) -> Result<Vec<u
         resvg::tiny_skia::Transform::from_scale(scale_f, scale_f),
         &mut pixmap.as_mut(),
     );
+
     pixmap.encode_png().map_err(|err| err.to_string())
 }

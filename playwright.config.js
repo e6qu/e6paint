@@ -7,7 +7,10 @@
 
 module.exports = {
   testDir: "e2e",
-  timeout: 60_000,
+  timeout: 90_000,
+  // One worker: every spec boots the same trunk server and the wasm app is
+  // heavy; parallel pages contend for CPU and blow the boot timeout.
+  workers: 1,
   use: {
     baseURL: "http://127.0.0.1:4173",
     // Headless Chromium needs explicit opt-in for WebGPU, which the app

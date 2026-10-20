@@ -674,6 +674,22 @@ impl E6App {
             self.dirty = true;
         }
         self.editing_focused = false;
+        // eframe's hidden IME input keeps DOM focus after the editor closes,
+        // which silently kills every canvas-bound keyboard shortcut (keydown is
+        // bound on the canvas). Hand focus back explicitly.
+        #[cfg(target_arch = "wasm32")]
+        {
+            use wasm_bindgen::JsCast;
+            if let Some(canvas) = web_sys::window()
+                .and_then(|window| window.document())
+                .and_then(|document| document.get_element_by_id("e6paint_canvas"))
+            {
+                let _ = canvas.set_attribute("tabindex", "0");
+                if let Ok(element) = canvas.dyn_into::<web_sys::HtmlElement>() {
+                    let _ = element.focus();
+                }
+            }
+        }
     }
 
     fn run_hud_command(&mut self, command: HudCommand) {
@@ -1365,6 +1381,11 @@ impl E6App {
         }
         #[cfg(target_arch = "wasm32")]
         {
+            log::info!(
+                "svg export: {} elements, {} bytes",
+                elements.len(),
+                svg.len()
+            );
             if let Err(err) = storage::web::download_text("e6paint-board.svg", &svg) {
                 log::error!("SVG download failed: {err}");
             }
@@ -1374,8 +1395,15 @@ impl E6App {
     /// Render the board to PNG and hand it to the platform (download / file).
     fn export_png(&mut self) {
         let elements = self.doc.elements();
+        let started = Instant::now();
         match e6_render::export_png(&elements, &self.doc.title(), 2) {
             Ok(bytes) => {
+                log::info!(
+                    "png export: {} elements to {} bytes in {:.0} ms",
+                    elements.len(),
+                    bytes.len(),
+                    started.elapsed().as_millis()
+                );
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     let mut path = storage::native::json_path();
@@ -1442,22 +1470,41 @@ impl E6App {
         self.dirty = true;
     }
 
+    /// A key press from this frame's event stream with the modifiers captured on
+    /// that same event. The shared `input.modifiers` state is unreliable on web —
+    /// egui clears it between the DOM keydown and the frame read when the text
+    /// agent's focus changes — so every modifier shortcut reads per-event state.
+    fn key_pressed_with_modifiers(ctx: &egui::Context, key: egui::Key) -> Option<egui::Modifiers> {
+        ctx.input(|input| {
+            input.events.iter().rev().find_map(|event| match event {
+                egui::Event::Key {
+                    key: event_key,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } if *event_key == key => Some(*modifiers),
+                _ => None,
+            })
+        })
+    }
+
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
-        let (z, y, shift, modifier, delete, escape) = ctx.input(|input| {
-            (
-                input.key_pressed(egui::Key::Z),
-                input.key_pressed(egui::Key::Y),
-                input.modifiers.shift,
-                input.modifiers.command || input.modifiers.ctrl,
-                input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace),
-                input.key_pressed(egui::Key::Escape),
-            )
+        let z = Self::key_pressed_with_modifiers(ctx, egui::Key::Z);
+        let y = Self::key_pressed_with_modifiers(ctx, egui::Key::Y);
+        let e = Self::key_pressed_with_modifiers(ctx, egui::Key::E);
+        let enter = Self::key_pressed_with_modifiers(ctx, egui::Key::Enter);
+        let delete = ctx.input(|input| {
+            input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace)
         });
+        let escape = ctx.input(|input| input.key_pressed(egui::Key::Escape));
 
         if escape {
-            if self.editing.take().is_some() {
-                self.end_editing();
-            } else if self.draft.take().is_some() || self.marquee.take().is_some() {
+            // While editing, the inline editor owns Escape (it applies its buffer
+            // and closes in draw_text_editor, so queued keystrokes survive).
+            if self.editing.is_some() {
+                return;
+            }
+            if self.draft.take().is_some() || self.marquee.take().is_some() {
                 // draft or marquee discarded
             } else {
                 self.selection.clear();
@@ -1474,7 +1521,9 @@ impl E6App {
         // gesture for diagram tools. It works even while typing in the panel, so
         // this check sits above the keyboard_busy guard; canvas text editing is
         // left via Escape first anyway.
-        if modifier && ctx.input(|input| input.key_pressed(egui::Key::Enter)) {
+        if let Some(modifiers) = enter
+            && (modifiers.command || modifiers.ctrl)
+        {
             self.expand_mol();
             return;
         }
@@ -1501,8 +1550,10 @@ impl E6App {
 
         // cmd/ctrl+E exports SVG; add shift for PNG. Exports must not fire while
         // a text field owns the keyboard.
-        if modifier && ctx.input(|input| input.key_pressed(egui::Key::E)) {
-            let command = if shift {
+        if let Some(modifiers) = e
+            && (modifiers.command || modifiers.ctrl)
+        {
+            let command = if modifiers.shift {
                 HudCommand::ExportPng
             } else {
                 HudCommand::ExportSvg
@@ -1511,19 +1562,17 @@ impl E6App {
             return;
         }
 
-        if modifier && z {
-            if shift {
-                if let Err(err) = self.doc.redo() {
-                    log::error!("redo failed: {err}");
-                }
-            } else if let Err(err) = self.doc.undo() {
-                log::error!("undo failed: {err}");
-            }
-            self.selection.clear();
-            self.dirty = true;
-        } else if modifier && y {
-            if let Err(err) = self.doc.redo() {
-                log::error!("redo failed: {err}");
+        let undo_modifiers = z
+            .or(y)
+            .filter(|modifiers| modifiers.command || modifiers.ctrl);
+        if let Some(modifiers) = undo_modifiers {
+            let outcome = if modifiers.shift {
+                self.doc.redo()
+            } else {
+                self.doc.undo()
+            };
+            if let Err(err) = outcome {
+                log::error!("undo/redo failed: {err}");
             }
             self.selection.clear();
             self.dirty = true;
@@ -1965,7 +2014,7 @@ impl E6App {
         drop(elements);
         let mut changed = false;
         let mut submitted = false;
-        egui::Area::new(egui::Id::unique("e6_text_editor"))
+        egui::Area::new(egui::Id::unique(("e6_text_editor", id.raw())))
             .fixed_pos(egui::Pos2::new(
                 screen.x / pixels_per_point,
                 screen.y / pixels_per_point,
@@ -1989,7 +2038,11 @@ impl E6App {
             }
             self.dirty = true;
         }
-        if submitted {
+        // The editor owns Escape: applying the buffer before closing, so no
+        // keystroke queued in the same frame is lost (handle_shortcuts defers
+        // Escape to here while editing is open).
+        let escape_now = ctx.input(|input| input.key_pressed(egui::Key::Escape));
+        if submitted || escape_now {
             self.end_editing();
         }
     }
