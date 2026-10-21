@@ -24,7 +24,8 @@ async function waitPainted(page, collector) {
 function collector(page) {
   const lines = [];
   page.on("console", (msg) => {
-    if (msg.type() === "info" || msg.type() === "error") lines.push(msg.text());
+    if (msg.type() === "info" || msg.type() === "warn" || msg.type() === "error")
+      lines.push(msg.text());
   });
   return lines;
 }

@@ -16,6 +16,8 @@ pub const TAG_BATCH: u8 = 1;
 pub const TAG_PRESENCE: u8 = 2;
 pub const TAG_SNAPSHOT: u8 = 3;
 pub const TAG_WELCOME: u8 = 4;
+pub const TAG_PING: u8 = 5;
+pub const TAG_PONG: u8 = 6;
 
 /// Opaque per-connection identity (uuid v4 minted by the WS handler).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

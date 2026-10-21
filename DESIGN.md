@@ -291,3 +291,7 @@ To be canonized in `AGENTS.md` at M0; summary:
   full screen-reader coverage of canvas content is post-v1.0.
 - Web Worker offload for layout/import/expansion (§10) — did not ship in v1.0
   (main thread measured cheap); park until import latency shows up in practice.
+- Reconnect e2e — Playwright's offline emulation cannot sever an established
+  loopback WebSocket, so the pong-timeout reconnect cannot be triggered in
+  browser tests; the detection logic is unit-tested (collab::pong_timed_out)
+  and the machinery runs against the live relay in practice.

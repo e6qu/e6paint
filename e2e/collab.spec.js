@@ -153,6 +153,12 @@ test("share-link peers join, edits sync, and the room persists", async ({
     })
     .toBe(true);
 
+  // NOTE: a reconnect e2e (drop B's network, assert auto-reconnect) is not
+  // possible with Playwright: offline emulation cannot sever an established
+  // loopback WebSocket, so the pong timeout never fires. The detection logic
+  // itself is unit-tested (collab::pong_timed_out); the reconnect machinery
+  // (backoff + full-history resend) runs against the live relay in practice.
+
   // A view-only token joins fine, but its edits never reach the room.
   const c = await context.newPage();
   const consoleC = collector(c);

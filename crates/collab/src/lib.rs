@@ -86,6 +86,10 @@ pub mod frame {
     pub const TAG_SNAPSHOT: u8 = 3;
     /// Server -> peer, right after the join snapshot: `{"read_only": bool}`.
     pub const TAG_WELCOME: u8 = 4;
+    /// Client -> server liveness probe; the server echoes TAG_PONG.
+    pub const TAG_PING: u8 = 5;
+    /// Server -> client, echo of TAG_PING with identical payload.
+    pub const TAG_PONG: u8 = 6;
 
     /// Wrap a payload in its tag.
     pub fn wrap(tag: u8, payload: &[u8]) -> Vec<u8> {
@@ -190,6 +194,24 @@ impl Outbox {
 #[derive(Debug, Clone, Default)]
 pub struct Backoff {
     attempt: u32,
+}
+
+/// A ping is considered unanswered when it went out at least `timeout` ago and
+/// no pong arrived after it. No ping outstanding means the connection is
+/// presumed healthy (the heartbeat sends one on its interval).
+pub fn pong_timed_out(
+    last_ping: Option<Instant>,
+    last_pong: Option<Instant>,
+    now: Instant,
+    timeout: Duration,
+) -> bool {
+    let Some(sent) = last_ping else {
+        return false;
+    };
+    if now.duration_since(sent) < timeout {
+        return false;
+    }
+    last_pong.is_none_or(|pong| pong < sent)
 }
 
 /// First retry delay.
@@ -332,6 +354,44 @@ mod share_tests {
         assert_eq!(parsed.identity.color, 0x33_66CC);
         assert_eq!(parsed.cursor, Point::new(12.5, 3.0));
         Ok(())
+    }
+
+    #[test]
+    fn pong_timeout_detects_only_answered_liveness() {
+        let now = web_time::Instant::now();
+        let sent = now - web_time::Duration::from_secs(20);
+        assert!(pong_timed_out(
+            Some(sent),
+            None,
+            now,
+            web_time::Duration::from_secs(15)
+        ));
+        let pong_before_ping = sent - web_time::Duration::from_secs(1);
+        assert!(pong_timed_out(
+            Some(sent),
+            Some(pong_before_ping),
+            now,
+            web_time::Duration::from_secs(15)
+        ));
+        assert!(!pong_timed_out(
+            Some(now - web_time::Duration::from_secs(2)),
+            None,
+            now,
+            web_time::Duration::from_secs(15)
+        ));
+        let pong_after_ping = now;
+        assert!(!pong_timed_out(
+            Some(now - web_time::Duration::from_secs(2)),
+            Some(pong_after_ping),
+            now,
+            web_time::Duration::from_secs(15)
+        ));
+        assert!(!pong_timed_out(
+            None,
+            None,
+            now,
+            web_time::Duration::from_secs(15)
+        ));
     }
 
     #[test]

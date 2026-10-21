@@ -23,7 +23,8 @@ use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
 
 use room::{
-    PeerId, PersistFn, RoomHandles, RoomMsg, TAG_BATCH, TAG_PRESENCE, TAG_SNAPSHOT, TAG_WELCOME,
+    PeerId, PersistFn, RoomHandles, RoomMsg, TAG_BATCH, TAG_PING, TAG_PONG, TAG_PRESENCE,
+    TAG_SNAPSHOT, TAG_WELCOME,
 };
 
 /// Shared relay state: SQLite handle + live room registry.
@@ -239,28 +240,46 @@ async fn run_connection(
 
     let mut broadcast_rx = handles.broadcast.subscribe();
     let writer_peer = peer.clone();
+    // Connection-local outbound lane: pings echo here without touching the room
+    // actor, so liveness works even while a peer is idle.
+    let (local_out_tx, mut local_out_rx) = tokio::sync::mpsc::unbounded_channel::<Message>();
     let write_task = tokio::spawn(async move {
         loop {
-            match broadcast_rx.recv().await {
-                Ok((sender, tag, payload)) => {
-                    if sender == writer_peer {
-                        continue;
-                    }
-                    if sink
-                        .send(Message::Binary(wrap(tag, &payload).into()))
-                        .await
-                        .is_err()
-                    {
-                        break;
+            tokio::select! {
+                outcome = broadcast_rx.recv() => {
+                    match outcome {
+                        Ok((sender, tag, payload)) => {
+                            if sender == writer_peer {
+                                continue;
+                            }
+                            if sink
+                                .send(Message::Binary(wrap(tag, &payload).into()))
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
+                            log::warn!("peer lagged behind {count} frames; continuing");
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                     }
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
-                    log::warn!("peer lagged behind {count} frames; continuing");
+                message = local_out_rx.recv() => {
+                    match message {
+                        Some(message) => {
+                            if sink.send(message).await.is_err() {
+                                break;
+                            }
+                        }
+                        None => break,
+                    }
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }
         }
     });
+    let local_out_tx = std::sync::Arc::new(local_out_tx);
 
     let ingest = handles.ingest.clone();
     while let Some(message) = stream.next().await {
@@ -288,6 +307,15 @@ async fn run_connection(
                 }
                 TAG_SNAPSHOT => {
                     log::warn!("peer {peer:?} sent a snapshot frame; ignored");
+                }
+                // Liveness is between the peer and its own connection: echoed
+                // here without the room actor so dead peers are detectable even
+                // while idle.
+                TAG_PING => {
+                    let pong = wrap(TAG_PONG, &bytes[1..]);
+                    if local_out_tx.send(Message::Binary(pong.into())).is_err() {
+                        break;
+                    }
                 }
                 _ => {}
             },
@@ -468,6 +496,14 @@ mod ws_e2e_tests {
             join_welcome[0], TAG_WELCOME,
             "joiners learn their access level"
         );
+
+        // Liveness: a ping is echoed as a pong with identical payload.
+        a_tx.send(Message::Binary(wrap(TAG_PING, br#"probe"#).into()))
+            .await?;
+        let pong = next_binary(&mut a_rx).await?;
+        assert_eq!(pong[0], TAG_PONG);
+        assert_eq!(&pong[1..], br#"probe"#);
+
         a_tx.send(Message::Binary(
             wrap(TAG_BATCH, &sample_batch("from-a")?).into(),
         ))

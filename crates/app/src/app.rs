@@ -73,6 +73,10 @@ struct CollabSession {
     /// The relay told us this token is view-only: edits stay local and are not
     /// synced (the relay would reject them anyway).
     read_only: bool,
+    /// Liveness: when the last ping went out and when the last pong came back.
+    /// A ping without a pong inside the timeout means the transport is dead.
+    last_ping_sent: Option<Instant>,
+    last_pong_at: Option<Instant>,
     remote_cursors: Vec<RemoteCursor>,
 }
 
@@ -1283,6 +1287,8 @@ impl E6App {
             backoff: Backoff::default(),
             reconnect_at: None,
             read_only: false,
+            last_ping_sent: None,
+            last_pong_at: None,
             remote_cursors: Vec::new(),
         });
     }
@@ -1368,6 +1374,12 @@ impl E6App {
                     return;
                 };
                 match tag {
+                    frame::TAG_PONG => {
+                        let session = self.collab.as_mut();
+                        if let Some(session) = session {
+                            session.last_pong_at = Some(Instant::now());
+                        }
+                    }
                     frame::TAG_WELCOME => {
                         let read_only = serde_json::from_slice::<serde_json::Value>(payload)
                             .ok()
@@ -2416,6 +2428,45 @@ impl eframe::App for E6App {
             for event in events {
                 self.handle_ws_event(event);
             }
+            // Liveness heartbeat: ping on an interval; a ping without a pong
+            // inside the timeout means the transport is dead (no OS-level error
+            // fires for half-open sockets), so force a reconnect.
+            if let Some(session) = self.collab.as_mut()
+                && session.transport.as_ref().is_some_and(|t| t.is_open())
+            {
+                let now = Instant::now();
+                const PING_INTERVAL: Duration = Duration::from_secs(5);
+                const PONG_TIMEOUT: Duration = Duration::from_secs(15);
+                let ping_due = session
+                    .last_ping_sent
+                    .map(|sent| now.duration_since(sent) >= PING_INTERVAL)
+                    .unwrap_or(true);
+                if ping_due {
+                    session.last_ping_sent = Some(now);
+                    let frame = frame::wrap(frame::TAG_PING, &[]);
+                    if let Some(transport) = session.transport.as_ref()
+                        && let Err(err) = transport.send(frame)
+                    {
+                        log::error!("ping send failed: {err}");
+                        let delay = session.backoff.fail();
+                        session.transport = None;
+                        session.reconnect_at = Some(now + delay);
+                    }
+                }
+                let stale = e6_collab::pong_timed_out(
+                    session.last_ping_sent,
+                    session.last_pong_at,
+                    now,
+                    PONG_TIMEOUT,
+                );
+                if stale {
+                    log::warn!("connection lost (no pong); reconnecting");
+                    let delay = session.backoff.fail();
+                    session.transport = None;
+                    session.reconnect_at = Some(now + delay);
+                }
+            }
+
             // Auto-reconnect: when a dropped session's retry window elapses, reopen the
             // socket to the same room.
             let due = self
