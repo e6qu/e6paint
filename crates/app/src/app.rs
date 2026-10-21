@@ -70,6 +70,9 @@ struct CollabSession {
     backoff: Backoff,
     /// When due, retry the socket connection.
     reconnect_at: Option<Instant>,
+    /// The relay told us this token is view-only: edits stay local and are not
+    /// synced (the relay would reject them anyway).
+    read_only: bool,
     remote_cursors: Vec<RemoteCursor>,
 }
 
@@ -1279,6 +1282,7 @@ impl E6App {
             presence_throttle: SendThrottle::default(),
             backoff: Backoff::default(),
             reconnect_at: None,
+            read_only: false,
             remote_cursors: Vec::new(),
         });
     }
@@ -1315,11 +1319,9 @@ impl E6App {
     /// reconnects always resend full history, so nothing can be lost.
     #[cfg(target_arch = "wasm32")]
     fn flush_sync(&mut self) -> bool {
-        let Some(session) = self
-            .collab
-            .as_mut()
-            .filter(|session| session.transport.as_ref().is_some_and(|t| t.is_open()))
-        else {
+        let Some(session) = self.collab.as_mut().filter(|session| {
+            !session.read_only && session.transport.as_ref().is_some_and(|t| t.is_open())
+        }) else {
             return true;
         };
         match self.doc.full_updates() {
@@ -1366,6 +1368,20 @@ impl E6App {
                     return;
                 };
                 match tag {
+                    frame::TAG_WELCOME => {
+                        let read_only = serde_json::from_slice::<serde_json::Value>(payload)
+                            .ok()
+                            .and_then(|value| value["read_only"].as_bool())
+                            .unwrap_or(false);
+                        let session = self.collab.as_mut();
+                        if let Some(session) = session {
+                            session.read_only = read_only;
+                        }
+                        if read_only {
+                            log::info!("view-only session: edits stay on this device");
+                            self.notify("view-only session: edits stay on this device");
+                        }
+                    }
                     frame::TAG_SNAPSHOT | frame::TAG_BATCH => {
                         if let Err(err) = self.doc.apply_remote(payload) {
                             log::error!("remote update rejected: {err}");

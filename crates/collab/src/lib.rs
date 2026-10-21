@@ -84,6 +84,8 @@ pub mod frame {
     pub const TAG_PRESENCE: u8 = 2;
     /// Snapshot (join payload).
     pub const TAG_SNAPSHOT: u8 = 3;
+    /// Server -> peer, right after the join snapshot: `{"read_only": bool}`.
+    pub const TAG_WELCOME: u8 = 4;
 
     /// Wrap a payload in its tag.
     pub fn wrap(tag: u8, payload: &[u8]) -> Vec<u8> {

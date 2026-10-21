@@ -162,11 +162,14 @@ test("share-link peers join, edits sync, and the room persists", async ({
   const boxC = await c.locator("#e6paint_canvas").boundingBox();
   expect(boxC, "canvas must be laid out on C").not.toBeNull();
   await drawPenStroke(c, c.locator("#e6paint_canvas"), boxC);
-  await expect
-    .poll(() => relayLogMentions("batch from read-only peer"), {
-      timeout: 20_000,
-    })
-    .toBe(true);
+  // The relay tells view-only peers their access level; the app surfaces it in
+  // the HUD and suppresses sync (the relay would reject the batches anyway -
+  // server-side rejection is covered by the relay's own e2e).
+  expect(
+    consoleC.some((t) => t.includes("view-only session")),
+    `page C never learned it is view-only; console: ${consoleC.join(" | ")}`
+  ).toBe(true);
+  expectNoProblems(consoleC, "page C");
   await c.close();
 
   // Leaving drains the room actor, which persists a snapshot before exiting.

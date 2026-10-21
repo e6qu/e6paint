@@ -22,7 +22,9 @@ use axum::{Json, Router};
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
 
-use room::{PeerId, PersistFn, RoomHandles, RoomMsg, TAG_BATCH, TAG_PRESENCE, TAG_SNAPSHOT};
+use room::{
+    PeerId, PersistFn, RoomHandles, RoomMsg, TAG_BATCH, TAG_PRESENCE, TAG_SNAPSHOT, TAG_WELCOME,
+};
 
 /// Shared relay state: SQLite handle + live room registry.
 pub struct RelayState {
@@ -143,7 +145,10 @@ async fn ws_upgrade(
         })
         .await
         .map_err(|_| internal("room closed during join"))?;
-    Ok(upgrade.on_upgrade(move |socket| run_connection(socket, handles, peer, snapshot)))
+    Ok(
+        upgrade
+            .on_upgrade(move |socket| run_connection(socket, handles, peer, snapshot, read_only)),
+    )
 }
 
 /// Get (or create) the room actor's handles; the returned snapshot is the live doc's
@@ -202,7 +207,13 @@ async fn join_room(
 }
 
 /// One connected peer: reader + writer halves over the tagged-frame protocol.
-async fn run_connection(socket: WebSocket, handles: RoomHandles, peer: PeerId, snapshot: Vec<u8>) {
+async fn run_connection(
+    socket: WebSocket,
+    handles: RoomHandles,
+    peer: PeerId,
+    snapshot: Vec<u8>,
+    read_only: bool,
+) {
     use futures_util::{SinkExt, StreamExt};
 
     let (mut sink, mut stream) = socket.split();
@@ -211,6 +222,18 @@ async fn run_connection(socket: WebSocket, handles: RoomHandles, peer: PeerId, s
     // Joining peer receives the current snapshot first. The actor's reply is already a
     // tagged frame.
     if snapshot.len() > 1 && sink.send(Message::Binary(snapshot.into())).await.is_err() {
+        return;
+    }
+
+    // Tell the peer its access level: a view-only client surfaces this instead of
+    // silently dropping its edits on the floor.
+    let welcome = wrap(
+        TAG_WELCOME,
+        serde_json::to_vec(&json!({ "read_only": read_only }))
+            .unwrap_or_default()
+            .as_slice(),
+    );
+    if sink.send(Message::Binary(welcome.into())).await.is_err() {
         return;
     }
 
@@ -440,6 +463,11 @@ mod ws_e2e_tests {
         let (mut a_tx, mut a_rx) = connect(addr, &room_id, &token).await?;
         let join_snapshot = next_binary(&mut a_rx).await?;
         assert_eq!(join_snapshot[0], TAG_SNAPSHOT);
+        let join_welcome = next_binary(&mut a_rx).await?;
+        assert_eq!(
+            join_welcome[0], TAG_WELCOME,
+            "joiners learn their access level"
+        );
         a_tx.send(Message::Binary(
             wrap(TAG_BATCH, &sample_batch("from-a")?).into(),
         ))
@@ -449,6 +477,8 @@ mod ws_e2e_tests {
         let (mut b_tx, mut b_rx) = connect(addr, &room_id, &token).await?;
         let snapshot = next_binary(&mut b_rx).await?;
         assert_eq!(snapshot[0], TAG_SNAPSHOT, "joiners get a snapshot first");
+        let welcome = next_binary(&mut b_rx).await?;
+        assert_eq!(welcome[0], TAG_WELCOME, "joiners learn their access level");
         let mirror = LoroDoc::new();
         mirror.import(&snapshot[1..])?;
         assert!(

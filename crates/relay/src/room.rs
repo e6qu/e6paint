@@ -15,6 +15,7 @@ type PersistCallback = Arc<dyn Fn(&[u8]) -> Result<(), String> + Send + Sync>;
 pub const TAG_BATCH: u8 = 1;
 pub const TAG_PRESENCE: u8 = 2;
 pub const TAG_SNAPSHOT: u8 = 3;
+pub const TAG_WELCOME: u8 = 4;
 
 /// Opaque per-connection identity (uuid v4 minted by the WS handler).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
