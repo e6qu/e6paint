@@ -34,7 +34,7 @@ jobs:
         run: trunk build --release --public-url /e6paint/
         working-directory: crates/app
       - name: Deploy (the canvas is the page)
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: crates/app/dist
       - id: deployment
