@@ -3,7 +3,7 @@
 //! Canvas text is drawn here as an egui overlay until parley-in-vello lands; it is drawn
 //! above the vello scene, so heavily stacked boards may show text over later shapes.
 
-use e6_editor::Tool;
+pub use e6_editor::Tool;
 use e6_scene::{Camera, Element, ElementId, ElementKind};
 
 pub mod icons;
@@ -50,7 +50,7 @@ pub fn draw_library_content(ui: &mut egui::Ui) -> Option<PanelAction> {
         (LibraryEntry::Card, "Card"),
         (LibraryEntry::Heading, "Heading"),
         (LibraryEntry::Frame16x9, "Frame 16:9"),
-        (LibraryEntry::FlowTrio, "Flow (A → B)"),
+        (LibraryEntry::FlowTrio, "Flow (A -> B)"),
     ];
     for (entry, label) in ENTRIES {
         if ui.button(label).clicked() {
@@ -206,6 +206,12 @@ pub fn draw_tool_bar(ui: &mut egui::Ui, active: Tool) -> Option<Tool> {
                 for (index, (tool, label)) in TOOLS.iter().enumerate() {
                     let (rect, response) =
                         bar.allocate_exact_size(egui::Vec2::splat(38.0), egui::Sense::click());
+                    let hotkey_label = format!("{label} — {}", index + 1);
+                    // A custom-painted button has no label otherwise: give the
+                    // accesskit tree (screen readers, kittest queries) a name.
+                    response.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::Role::Button, true, hotkey_label.clone())
+                    });
                     let is_active = active == *tool;
                     if is_active {
                         bar.painter()
@@ -223,7 +229,7 @@ pub fn draw_tool_bar(ui: &mut egui::Ui, active: Tool) -> Option<Tool> {
                     if response.clicked() {
                         picked = Some(*tool);
                     }
-                    response.on_hover_text(format!("{label} — {}", index + 1));
+                    response.on_hover_text(hotkey_label);
                 }
             });
         });
@@ -305,13 +311,13 @@ pub fn draw_top_bar(
         .show(ui, |bar| {
             bar.horizontal(|bar| {
                 if bar
-                    .add_enabled(availability.can_undo, egui::Button::new("↶ Undo"))
+                    .add_enabled(availability.can_undo, egui::Button::new("Undo"))
                     .clicked()
                 {
                     command = HudCommand::Undo;
                 }
                 if bar
-                    .add_enabled(availability.can_redo, egui::Button::new("↷ Redo"))
+                    .add_enabled(availability.can_redo, egui::Button::new("Redo"))
                     .clicked()
                 {
                     command = HudCommand::Redo;
@@ -426,7 +432,7 @@ pub fn draw_top_bar(
                 if bar.button(sketch_label).clicked() {
                     command = HudCommand::ToggleSketch;
                 }
-                if bar.button("▶ Present").clicked() {
+                if bar.button("Present").clicked() {
                     command = HudCommand::Present;
                 }
                 if bar.button("Reset").clicked() {
@@ -567,6 +573,7 @@ pub fn draw_code_content(ui: &mut egui::Ui, state: &mut CodePanelState) -> CodeA
             editor.add(
                 egui::TextEdit::multiline(&mut state.text)
                     .desired_width(200.0)
+                    .hint_text("mol source…")
                     .font(egui::FontId::monospace(12.0)),
             );
         });

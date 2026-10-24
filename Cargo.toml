@@ -36,7 +36,7 @@ e6-ui = { path = "crates/ui" }
 
 # Aligned on one wgpu major (DESIGN D9/R2): eframe 0.37 (egui-wgpu) and vello 0.11 both require wgpu ^30.
 eframe = "0.37"
-egui = "0.37"
+egui = { version = "0.37", features = ["default_fonts"] }
 vello = "0.11"
 wgpu = "30"
 
@@ -52,6 +52,8 @@ rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
 proptest = "1"
+kittest = "0.5"
+egui_kittest = "0.37"
 web-time = "1"
 tokio-tungstenite = "0.29"
 futures-util = "0.3"
