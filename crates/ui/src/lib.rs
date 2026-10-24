@@ -42,66 +42,60 @@ pub fn kind_label(kind: ElementKind) -> &'static str {
     }
 }
 
-/// The library panel: preset stamps to insert. Returns the picked entry, if any.
-pub fn draw_library_panel(ui: &mut egui::Ui) -> Option<PanelAction> {
+/// The library content: preset stamps to insert. Returns the picked entry, if any.
+pub fn draw_library_content(ui: &mut egui::Ui) -> Option<PanelAction> {
     let mut picked = None;
-    egui::Panel::right("e6_library_panel").show(ui, |panel| {
-        panel.heading("Library");
-        const ENTRIES: [(LibraryEntry, &str); 5] = [
-            (LibraryEntry::Sticky, "Sticky note"),
-            (LibraryEntry::Card, "Card"),
-            (LibraryEntry::Heading, "Heading"),
-            (LibraryEntry::Frame16x9, "Frame 16:9"),
-            (LibraryEntry::FlowTrio, "Flow (A → B)"),
-        ];
-        for (entry, label) in ENTRIES {
-            if panel.button(label).clicked() {
-                picked = Some(PanelAction::Insert(entry));
-            }
+    const ENTRIES: [(LibraryEntry, &str); 5] = [
+        (LibraryEntry::Sticky, "Sticky note"),
+        (LibraryEntry::Card, "Card"),
+        (LibraryEntry::Heading, "Heading"),
+        (LibraryEntry::Frame16x9, "Frame 16:9"),
+        (LibraryEntry::FlowTrio, "Flow (A → B)"),
+    ];
+    for (entry, label) in ENTRIES {
+        if ui.button(label).clicked() {
+            picked = Some(PanelAction::Insert(entry));
         }
-    });
+    }
     picked
 }
 
-/// The layers panel: recent elements, newest first (capped), with per-row selection
+/// The layers content: recent elements, newest first (capped), with per-row selection
 /// and visibility toggle. Returns the action, if any.
-pub fn draw_layers_panel(
+pub fn draw_layers_content(
     ui: &mut egui::Ui,
     elements: &[Element],
     selection: &e6_editor::Selection,
 ) -> Option<PanelAction> {
     let mut action = None;
-    egui::Panel::right("e6_layers_panel").show(ui, |panel| {
-        panel.heading("Layers");
-        const MAX_ROWS: usize = 300;
-        let shown = elements.len().min(MAX_ROWS);
-        egui::ScrollArea::vertical().show(panel, |row_area| {
-            for element in elements.iter().rev().take(shown) {
-                let id = element.id;
-                row_area.horizontal(|row| {
-                    let mut label = match element.text.as_str() {
-                        "" => kind_label(element.kind).to_owned(),
-                        text => format!("{} · {}", kind_label(element.kind), text),
-                    };
-                    if label.len() > 24 {
-                        label.truncate(24);
-                    }
-                    if row
-                        .selectable_label(selection.contains(id), label)
-                        .clicked()
-                    {
-                        action = Some(PanelAction::Select(id));
-                    }
-                    let toggle = if element.hidden { "Show" } else { "Hide" };
-                    if row.small_button(toggle).clicked() {
-                        action = Some(PanelAction::ToggleHidden(id));
-                    }
-                });
-            }
-            if elements.len() > MAX_ROWS {
-                row_area.label(format!("… and {} more", elements.len() - MAX_ROWS));
-            }
-        });
+    const MAX_ROWS: usize = 300;
+    let shown = elements.len().min(MAX_ROWS);
+    egui::ScrollArea::vertical().show(ui, |row_area| {
+        for element in elements.iter().rev().take(shown) {
+            let id = element.id;
+            row_area.horizontal(|row| {
+                let mut label = match element.text.as_str() {
+                    "" => kind_label(element.kind).to_owned(),
+                    text => format!("{} · {}", kind_label(element.kind), text),
+                };
+                if label.len() > 24 {
+                    label.truncate(24);
+                }
+                if row
+                    .selectable_label(selection.contains(id), label)
+                    .clicked()
+                {
+                    action = Some(PanelAction::Select(id));
+                }
+                let toggle = if element.hidden { "Show" } else { "Hide" };
+                if row.small_button(toggle).clicked() {
+                    action = Some(PanelAction::ToggleHidden(id));
+                }
+            });
+        }
+        if elements.len() > MAX_ROWS {
+            row_area.label(format!("… and {} more", elements.len() - MAX_ROWS));
+        }
     });
     action
 }
@@ -238,59 +232,107 @@ pub fn draw_tool_bar(ui: &mut egui::Ui, active: Tool) -> Option<Tool> {
 
 /// Draws the bottom status HUD with the action bar; returns the pressed command.
 /// Call once per pass onto the root UI, before the canvas.
-pub fn draw_bottom_bar(
+/// Which tab is active in the right drawer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrawerTab {
+    Library,
+    Layers,
+    Code,
+}
+
+/// The right drawer: one panel, three tabs (Library | Layers | mol). Returns the
+/// active tab, the library/layers action, and the mol action.
+pub fn draw_right_drawer(
+    ui: &mut egui::Ui,
+    tab: DrawerTab,
+    elements: &[Element],
+    selection: &e6_editor::Selection,
+    code_panel: &mut CodePanelState,
+) -> (DrawerTab, Option<PanelAction>, CodeAction) {
+    let mut tab = tab;
+    let mut panel_action = None;
+    let mut code_action = CodeAction::None;
+    egui::Panel::right("e6_drawer")
+        .exact_size(248.0)
+        .resizable(false)
+        .frame(
+            egui::Frame::new()
+                .fill(egui::Color32::from_rgb(24, 24, 32))
+                .inner_margin(egui::Margin::same(10)),
+        )
+        .show(ui, |panel| {
+            panel.horizontal(|row| {
+                for (candidate, label) in [
+                    (DrawerTab::Library, "Library"),
+                    (DrawerTab::Layers, "Layers"),
+                    (DrawerTab::Code, "mol"),
+                ] {
+                    if row.selectable_label(tab == candidate, label).clicked() {
+                        tab = candidate;
+                    }
+                }
+            });
+            panel.add_space(6.0);
+            match tab {
+                DrawerTab::Library => {
+                    panel_action = draw_library_content(panel);
+                }
+                DrawerTab::Layers => {
+                    panel_action = draw_layers_content(panel, elements, selection);
+                }
+                DrawerTab::Code => {
+                    code_action = draw_code_content(panel, code_panel);
+                }
+            }
+        });
+    (tab, panel_action, code_action)
+}
+
+/// The top action bar: edit tools, arrange menu, insert/share/export menus, and
+/// the transient notice. Miro-style chrome; keyboard shortcuts are unchanged.
+pub fn draw_top_bar(
     ui: &mut egui::Ui,
     state: &HudState,
-    availability: HudAvailability,
+    availability: &HudAvailability,
 ) -> HudCommand {
     let mut command = HudCommand::None;
-    egui::Panel::bottom("e6_status_hud").show(ui, |bar| {
-        bar.horizontal(|bar| {
-            match &state.notice {
-                Some(notice) if state.notice_until.is_some() => {
-                    bar.colored_label(egui::Color32::from_rgb(235, 195, 120), notice)
-                }
-                _ => bar.label(format_status(state)),
-            };
-            bar.with_layout(egui::Layout::right_to_left(egui::Align::Center), |bar| {
+    egui::Panel::top("e6_top_bar")
+        .frame(
+            egui::Frame::new()
+                .fill(egui::Color32::from_rgb(24, 24, 32))
+                .inner_margin(egui::Margin::symmetric(10, 6)),
+        )
+        .show(ui, |bar| {
+            bar.horizontal(|bar| {
                 if bar
-                    .add_enabled(availability.can_redo, egui::Button::new("Redo"))
-                    .clicked()
-                {
-                    command = HudCommand::Redo;
-                }
-                if bar
-                    .add_enabled(availability.can_undo, egui::Button::new("Undo"))
+                    .add_enabled(availability.can_undo, egui::Button::new("↶ Undo"))
                     .clicked()
                 {
                     command = HudCommand::Undo;
                 }
                 if bar
-                    .add_enabled(availability.has_selection, egui::Button::new("Front"))
+                    .add_enabled(availability.can_redo, egui::Button::new("↷ Redo"))
                     .clicked()
                 {
-                    command = HudCommand::BringToFront;
+                    command = HudCommand::Redo;
                 }
-                if bar
-                    .add_enabled(availability.has_selection, egui::Button::new("Back"))
-                    .clicked()
-                {
-                    command = HudCommand::SendToBack;
-                }
+                bar.separator();
+
                 use e6_editor::align::AlignMode;
                 let count = state.selected_elements;
-                bar.menu_button("Align", |menu| {
-                    let entries = [
-                        ("Left", AlignMode::Left, 2),
-                        ("Center", AlignMode::CenterH, 2),
-                        ("Right", AlignMode::Right, 2),
-                        ("Top", AlignMode::Top, 2),
-                        ("Middle", AlignMode::CenterV, 2),
-                        ("Bottom", AlignMode::Bottom, 2),
-                        ("Distribute H", AlignMode::DistributeH, 3),
-                        ("Distribute V", AlignMode::DistributeV, 3),
+                bar.menu_button("Arrange", |menu| {
+                    let align_entries = [
+                        ("Align left", AlignMode::Left, 2),
+                        ("Align centers", AlignMode::CenterH, 2),
+                        ("Align right", AlignMode::Right, 2),
+                        ("Align top", AlignMode::Top, 2),
+                        ("Align middles", AlignMode::CenterV, 2),
+                        ("Align bottom", AlignMode::Bottom, 2),
+                        ("Distribute horizontally", AlignMode::DistributeH, 3),
+                        ("Distribute vertically", AlignMode::DistributeV, 3),
                     ];
-                    for (label, mode, min) in entries {
+                    menu.set_min_width(180.0);
+                    for (label, mode, min) in align_entries {
                         if menu
                             .add_enabled(count >= min, egui::Button::new(label))
                             .clicked()
@@ -298,30 +340,84 @@ pub fn draw_bottom_bar(
                             command = HudCommand::Align(mode);
                         }
                     }
+                    menu.separator();
+                    if menu
+                        .add_enabled(availability.can_group, egui::Button::new("Group"))
+                        .clicked()
+                    {
+                        command = HudCommand::Group;
+                    }
+                    if menu
+                        .add_enabled(availability.has_selection, egui::Button::new("Ungroup"))
+                        .clicked()
+                    {
+                        command = HudCommand::Ungroup;
+                    }
+                    let lock_label = if availability.any_selected_locked {
+                        "Unlock"
+                    } else {
+                        "Lock"
+                    };
+                    if menu
+                        .add_enabled(availability.has_selection, egui::Button::new(lock_label))
+                        .clicked()
+                    {
+                        command = HudCommand::ToggleLock;
+                    }
+                    menu.separator();
+                    if menu
+                        .add_enabled(
+                            availability.has_selection,
+                            egui::Button::new("Bring to front"),
+                        )
+                        .clicked()
+                    {
+                        command = HudCommand::BringToFront;
+                    }
+                    if menu
+                        .add_enabled(
+                            availability.has_selection,
+                            egui::Button::new("Send to back"),
+                        )
+                        .clicked()
+                    {
+                        command = HudCommand::SendToBack;
+                    }
                 });
-                if bar
-                    .add_enabled(availability.can_group, egui::Button::new("Group"))
-                    .clicked()
-                {
-                    command = HudCommand::Group;
-                }
-                if bar
-                    .add_enabled(availability.has_selection, egui::Button::new("Ungroup"))
-                    .clicked()
-                {
-                    command = HudCommand::Ungroup;
-                }
-                let lock_label = if availability.any_selected_locked {
-                    "Unlock"
-                } else {
-                    "Lock"
-                };
-                if bar
-                    .add_enabled(availability.has_selection, egui::Button::new(lock_label))
-                    .clicked()
-                {
-                    command = HudCommand::ToggleLock;
-                }
+
+                bar.menu_button("Insert", |menu| {
+                    if menu.button("Image…").clicked() {
+                        command = HudCommand::InsertImage;
+                    }
+                });
+
+                bar.menu_button("Share", |menu| {
+                    if menu.button("Share edit link").clicked() {
+                        command = HudCommand::ShareEdit;
+                    }
+                    if menu
+                        .add_enabled(
+                            availability.can_share_view,
+                            egui::Button::new("Share view link"),
+                        )
+                        .clicked()
+                    {
+                        command = HudCommand::ShareView;
+                    }
+                });
+
+                bar.menu_button("Export", |menu| {
+                    if menu.button("SVG (cmd/ctrl+E)").clicked() {
+                        command = HudCommand::ExportSvg;
+                    }
+                    if menu.button("PNG (cmd/ctrl+shift+E)").clicked() {
+                        command = HudCommand::ExportPng;
+                    }
+                    if menu.button("JSON").clicked() {
+                        command = HudCommand::ExportJson;
+                    }
+                });
+
                 let sketch_label = if availability.sketch {
                     "Sketch ✓"
                 } else {
@@ -330,37 +426,30 @@ pub fn draw_bottom_bar(
                 if bar.button(sketch_label).clicked() {
                     command = HudCommand::ToggleSketch;
                 }
-                if bar.button("Add image").clicked() {
-                    command = HudCommand::InsertImage;
-                }
-                if bar.button("Share edit").clicked() {
-                    command = HudCommand::ShareEdit;
-                }
-                if bar
-                    .add_enabled(availability.can_share_view, egui::Button::new("Share view"))
-                    .clicked()
-                {
-                    command = HudCommand::ShareView;
-                }
-                if bar.button("Present").clicked() {
+                if bar.button("▶ Present").clicked() {
                     command = HudCommand::Present;
                 }
                 if bar.button("Reset").clicked() {
                     command = HudCommand::Reset;
                 }
-                if bar.button("Export JSON").clicked() {
-                    command = HudCommand::ExportJson;
-                }
-                if bar.button("Export SVG").clicked() {
-                    command = HudCommand::ExportSvg;
-                }
-                if bar.button("Export PNG").clicked() {
-                    command = HudCommand::ExportPng;
-                }
+
+                bar.with_layout(egui::Layout::right_to_left(egui::Align::Center), |bar| {
+                    if let Some(notice) = &state.notice {
+                        bar.colored_label(egui::Color32::from_rgb(235, 195, 120), notice.clone());
+                    }
+                });
             });
         });
-    });
     command
+}
+
+/// The slim bottom status bar: zoom, visibility, selection, frame time.
+pub fn draw_status_bar(ui: &mut egui::Ui, state: &HudState) {
+    egui::Panel::bottom("e6_status_bar").show(ui, |bar| {
+        bar.horizontal(|bar| {
+            bar.label(format_status(state));
+        });
+    });
 }
 
 /// Draws text payloads of text/sticky elements as an egui overlay over the canvas.
@@ -470,30 +559,27 @@ pub enum CodeAction {
 }
 
 /// The mol code panel: source editor, Expand/Import buttons, located errors.
-pub fn draw_code_panel(ui: &mut egui::Ui, state: &mut CodePanelState) -> CodeAction {
+pub fn draw_code_content(ui: &mut egui::Ui, state: &mut CodePanelState) -> CodeAction {
     let mut action = CodeAction::None;
-    egui::Panel::right("e6_code_panel").show(ui, |panel| {
-        panel.heading("mol");
-        egui::ScrollArea::vertical()
-            .max_height(220.0)
-            .show(panel, |editor| {
-                editor.add(
-                    egui::TextEdit::multiline(&mut state.text)
-                        .desired_width(220.0)
-                        .font(egui::FontId::monospace(12.0)),
-                );
-            });
-        panel.horizontal(|row| {
-            if row.button("Expand").clicked() {
-                action = CodeAction::Expand;
-            }
-            if row.button("Import Mermaid").clicked() {
-                action = CodeAction::ImportMermaid;
-            }
+    egui::ScrollArea::vertical()
+        .max_height(220.0)
+        .show(ui, |editor| {
+            editor.add(
+                egui::TextEdit::multiline(&mut state.text)
+                    .desired_width(200.0)
+                    .font(egui::FontId::monospace(12.0)),
+            );
         });
-        for error in &state.errors {
-            panel.label(egui::RichText::new(error).color(egui::Color32::from_rgb(255, 128, 128)));
+    ui.horizontal(|row| {
+        if row.button("Expand").clicked() {
+            action = CodeAction::Expand;
+        }
+        if row.button("Import Mermaid").clicked() {
+            action = CodeAction::ImportMermaid;
         }
     });
+    for error in &state.errors {
+        ui.label(egui::RichText::new(error).color(egui::Color32::from_rgb(255, 128, 128)));
+    }
     action
 }

@@ -14,7 +14,8 @@ use e6_scene::{
     Aabb, Camera, Element, ElementId, ElementKind, MAX_ZOOM, MIN_ZOOM, Point, Size, demo_board,
 };
 use e6_ui::{
-    HudAvailability, HudCommand, HudState, draw_bottom_bar, draw_canvas_text, draw_tool_bar,
+    DrawerTab, HudAvailability, HudCommand, HudState, draw_canvas_text, draw_status_bar,
+    draw_tool_bar, draw_top_bar,
 };
 use vello::Scene;
 
@@ -214,6 +215,8 @@ pub struct E6App {
     #[cfg(target_arch = "wasm32")]
     relay_http_base: String,
     fitted: bool,
+    /// Which right-drawer tab is active.
+    drawer_tab: DrawerTab,
     /// Canvas viewport in physical pixels, remembered for present-mode fitting.
     last_viewport: Size,
     /// A committed gesture is not yet autosaved.
@@ -304,6 +307,7 @@ impl E6App {
             #[cfg(target_arch = "wasm32")]
             relay_http_base: RELAY_HTTP_BASE.to_owned(),
             fitted: false,
+            drawer_tab: DrawerTab::Library,
             last_viewport: Size::new(1.0, 1.0),
             dirty: false,
             code_panel: e6_ui::CodePanelState::default(),
@@ -2237,6 +2241,7 @@ impl E6App {
         }
 
         self.draw_minimap(ui, rect, pixels_per_point);
+        draw_status_bar(ui, &self.hud);
     }
 }
 
@@ -2515,41 +2520,42 @@ impl eframe::App for E6App {
         if let Some(picked) = draw_tool_bar(ui, self.tool) {
             self.apply_tool(picked);
         }
-        let command = draw_bottom_bar(
-            ui,
-            &self.hud,
-            HudAvailability {
-                can_undo: self.doc.can_undo(),
-                can_redo: self.doc.can_redo(),
-                has_selection: !self.selection.is_empty(),
-                can_group: self.selection.len() >= 2,
-                any_selected_locked: self
-                    .doc
-                    .elements()
-                    .iter()
-                    .any(|e| self.selection.contains(e.id) && e.locked),
-                sketch: self.doc.sketch(),
-                // The read token exists only on web sessions; native has no collab.
-                #[cfg(target_arch = "wasm32")]
-                can_share_view: self
-                    .collab
-                    .as_ref()
-                    .is_some_and(|session| session.room.read_token.is_some()),
-                #[cfg(not(target_arch = "wasm32"))]
-                can_share_view: false,
-            },
-        );
+        let availability = HudAvailability {
+            can_undo: self.doc.can_undo(),
+            can_redo: self.doc.can_redo(),
+            has_selection: !self.selection.is_empty(),
+            can_group: self.selection.len() >= 2,
+            any_selected_locked: self
+                .doc
+                .elements()
+                .iter()
+                .any(|e| self.selection.contains(e.id) && e.locked),
+            sketch: self.doc.sketch(),
+            // The read token exists only on web sessions; native has no collab.
+            #[cfg(target_arch = "wasm32")]
+            can_share_view: self
+                .collab
+                .as_ref()
+                .is_some_and(|session| session.room.read_token.is_some()),
+            #[cfg(not(target_arch = "wasm32"))]
+            can_share_view: false,
+        };
+        let command = draw_top_bar(ui, &self.hud, &availability);
         self.run_hud_command(command);
         self.handle_shortcuts(ui.ctx());
 
-        // Right-hand panels consume canvas space, so they draw before the canvas.
-        if let Some(action) = e6_ui::draw_library_panel(ui) {
+        // The right drawer consumes canvas space, so it draws before the canvas.
+        let (drawer_tab, panel_action, code_action) = e6_ui::draw_right_drawer(
+            ui,
+            self.drawer_tab,
+            &elements,
+            &self.selection,
+            &mut self.code_panel,
+        );
+        self.drawer_tab = drawer_tab;
+        if let Some(action) = panel_action {
             self.handle_panel_action(action, &elements);
         }
-        if let Some(action) = e6_ui::draw_layers_panel(ui, &elements, &self.selection) {
-            self.handle_panel_action(action, &elements);
-        }
-        let code_action = e6_ui::draw_code_panel(ui, &mut self.code_panel);
         match code_action {
             e6_ui::CodeAction::None => {}
             e6_ui::CodeAction::Expand => self.expand_mol(),
