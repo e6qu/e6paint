@@ -197,7 +197,7 @@ pub fn draw_tool_bar(ui: &mut egui::Ui, active: Tool) -> Option<Tool> {
         .resizable(false)
         .frame(
             egui::Frame::new()
-                .fill(egui::Color32::from_rgb(24, 24, 32))
+                .fill(egui::Color32::from_rgb(0xFF, 0xFF, 0xFF))
                 .inner_margin(egui::Margin::symmetric(0, 8)),
         )
         .show(ui, |bar| {
@@ -214,16 +214,22 @@ pub fn draw_tool_bar(ui: &mut egui::Ui, active: Tool) -> Option<Tool> {
                     });
                     let is_active = active == *tool;
                     if is_active {
-                        bar.painter()
-                            .rect_filled(rect, 6.0, egui::Color32::from_rgb(52, 52, 72));
+                        bar.painter().rect_filled(
+                            rect,
+                            6.0,
+                            egui::Color32::from_rgb(226, 226, 240),
+                        );
                     } else if response.hovered() {
-                        bar.painter()
-                            .rect_filled(rect, 6.0, egui::Color32::from_rgb(38, 38, 52));
+                        bar.painter().rect_filled(
+                            rect,
+                            6.0,
+                            egui::Color32::from_rgb(240, 240, 246),
+                        );
                     }
                     let icon_color = if is_active {
-                        egui::Color32::from_rgb(235, 235, 250)
+                        egui::Color32::from_rgb(26, 26, 46)
                     } else {
-                        egui::Color32::from_rgb(170, 170, 190)
+                        egui::Color32::from_rgb(90, 90, 110)
                     };
                     icons::tool_icon(bar.painter(), rect, *tool, icon_color);
                     if response.clicked() {
@@ -263,7 +269,7 @@ pub fn draw_right_drawer(
         .resizable(false)
         .frame(
             egui::Frame::new()
-                .fill(egui::Color32::from_rgb(24, 24, 32))
+                .fill(egui::Color32::from_rgb(0xFF, 0xFF, 0xFF))
                 .inner_margin(egui::Margin::same(10)),
         )
         .show(ui, |panel| {
@@ -305,7 +311,7 @@ pub fn draw_top_bar(
     egui::Panel::top("e6_top_bar")
         .frame(
             egui::Frame::new()
-                .fill(egui::Color32::from_rgb(24, 24, 32))
+                .fill(egui::Color32::from_rgb(0xFF, 0xFF, 0xFF))
                 .inner_margin(egui::Margin::symmetric(10, 6)),
         )
         .show(ui, |bar| {
@@ -441,7 +447,7 @@ pub fn draw_top_bar(
 
                 bar.with_layout(egui::Layout::right_to_left(egui::Align::Center), |bar| {
                     if let Some(notice) = &state.notice {
-                        bar.colored_label(egui::Color32::from_rgb(235, 195, 120), notice.clone());
+                        bar.colored_label(egui::Color32::from_rgb(150, 90, 10), notice.clone());
                     }
                 });
             });

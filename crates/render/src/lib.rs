@@ -12,7 +12,8 @@ pub mod lcg;
 
 use vello::Scene;
 use vello::kurbo::{
-    Affine, BezPath, Point as KurboPoint, Rect, RoundedRect, Shape, Size as KurboSize, Stroke,
+    Affine, BezPath, Circle, Point as KurboPoint, Rect, RoundedRect, Shape, Size as KurboSize,
+    Stroke,
 };
 use vello::peniko::{self, Brush, Color, Fill};
 
@@ -61,6 +62,43 @@ const SKETCH_JITTER_PX: f64 = 2.4;
 /// Screen space is the render target's *physical pixel* space, matching the camera.
 /// Off-screen elements are skipped; that culling moves behind the spatial index when the
 /// quadtree lands.
+/// Miro-style dotted background: world-anchored dots that pan and zoom with the
+/// board. Spacing doubles whenever dots would crowd below ~28 screen px, so
+/// zooming out thins the grid instead of dense-cluttering it.
+fn draw_dot_grid(scene: &mut Scene, camera: &Camera, visible_region: &Aabb) {
+    let mut spacing = 32.0_f32;
+    while spacing * camera.zoom < 28.0 {
+        spacing *= 2.0;
+    }
+    // Screen-constant dot size.
+    let radius = (1.3 / camera.zoom).max(0.05);
+    let brush = brush_for(0xFFC9_C9D4);
+
+    let start_x = (visible_region.min.x / spacing).floor() * spacing;
+    let start_y = (visible_region.min.y / spacing).floor() * spacing;
+    let cols = (((visible_region.max.x - start_x) / spacing).ceil() as usize).saturating_sub(1);
+    let rows = (((visible_region.max.y - start_y) / spacing).ceil() as usize).saturating_sub(1);
+    if cols.saturating_mul(rows) > 12_000 {
+        return; // pathological zoom-out: skip rather than choke the frame
+    }
+    for row in 0..=rows {
+        for col in 0..=cols {
+            let world = Point::new(
+                start_x + col as f32 * spacing,
+                start_y + row as f32 * spacing,
+            );
+            let screen = screen_pos(camera, world);
+            scene.fill(
+                Fill::NonZero,
+                Affine::IDENTITY,
+                &brush,
+                None,
+                &Circle::new((screen.x, screen.y), f64::from(radius)),
+            );
+        }
+    }
+}
+
 pub fn build_display_list(
     scene: &mut Scene,
     camera: &Camera,
@@ -69,6 +107,7 @@ pub fn build_display_list(
     sketch: bool,
 ) -> DisplayStats {
     let visible_region = camera.viewport_aabb(viewport);
+    draw_dot_grid(scene, camera, &visible_region);
     let mut stats = DisplayStats {
         total: elements.len(),
         visible: 0,
@@ -328,6 +367,12 @@ fn draw_connector(scene: &mut Scene, camera: &Camera, element: &Element) {
     head_path.line_to(KurboPoint::new(base.x + uy * half, base.y - ux * half));
     head_path.close_path();
     scene.fill(Fill::NonZero, Affine::IDENTITY, &outline, None, &head_path);
+}
+
+/// Map a world point to canvas-local screen pixels (vello draws in that space).
+fn screen_pos(camera: &Camera, world: Point) -> KurboPoint {
+    let screen = camera.world_to_screen(world);
+    KurboPoint::new(f64::from(screen.x), f64::from(screen.y))
 }
 
 fn screen_rect(camera: &Camera, bounds: Aabb) -> Rect {

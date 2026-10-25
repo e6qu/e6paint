@@ -216,6 +216,8 @@ pub struct E6App {
     drawer_tab: DrawerTab,
     /// Canvas viewport in physical pixels, remembered for present-mode fitting.
     last_viewport: Size,
+    /// Canvas rect in egui points; anchor for the zoom widget.
+    last_canvas_rect: Option<egui::Rect>,
     /// A committed gesture is not yet autosaved.
     dirty: bool,
     /// mol code panel state (source text + last expansion errors).
@@ -306,6 +308,7 @@ impl E6App {
             fitted: false,
             drawer_tab: DrawerTab::Library,
             last_viewport: Size::new(1.0, 1.0),
+            last_canvas_rect: None,
             dirty: false,
             code_panel: e6_ui::CodePanelState::default(),
             mol_applied: None,
@@ -2238,7 +2241,60 @@ impl E6App {
         }
 
         self.draw_minimap(ui, rect, pixels_per_point);
+        self.draw_zoom_widget(ui, rect);
         draw_status_bar(ui, &self.hud);
+    }
+
+    /// Bottom-left zoom widget, Miro-style: zoom out, percentage, zoom in, fit.
+    /// Widget actions zoom around the canvas center.
+    fn draw_zoom_widget(&mut self, ui: &mut egui::Ui, canvas_rect: egui::Rect) {
+        self.last_canvas_rect = Some(canvas_rect);
+        egui::Area::new(egui::Id::unique("e6_zoom_widget"))
+            .anchor(egui::Align2::LEFT_BOTTOM, [12.0, -12.0])
+            .show(ui, |ui| {
+                egui::Frame::new()
+                    .fill(egui::Color32::from_rgb(0xFF, 0xFF, 0xFF))
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        egui::Color32::from_rgb(224, 224, 230),
+                    ))
+                    .inner_margin(egui::Margin::symmetric(6, 2))
+                    .corner_radius(6.0)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            let center_screen = canvas_rect.center();
+                            let world_center = self
+                                .camera
+                                .screen_to_world(Point::new(center_screen.x, center_screen.y));
+                            if ui.button("−").clicked() {
+                                self.camera.zoom_at(world_center, 1.0 / 1.2);
+                            }
+                            let zoom_pct = format!("{}%", (self.camera.zoom * 100.0) as u32);
+                            if ui
+                                .add(egui::Button::new(egui::RichText::new(zoom_pct).small()))
+                                .clicked()
+                            {
+                                // Click the percentage to reset to 100%.
+                                self.camera.zoom_at(world_center, 1.0 / self.camera.zoom);
+                            }
+                            if ui.button("+").clicked() {
+                                self.camera.zoom_at(world_center, 1.2);
+                            }
+                            ui.separator();
+                            if ui
+                                .add(egui::Button::new(egui::RichText::new("Fit").small()))
+                                .clicked()
+                            {
+                                let viewport = Size::new(
+                                    canvas_rect.width() * ui.ctx().pixels_per_point(),
+                                    canvas_rect.height() * ui.ctx().pixels_per_point(),
+                                );
+                                self.fit_camera(viewport);
+                                self.fitted = true;
+                            }
+                        });
+                    });
+            });
     }
 }
 
@@ -2281,7 +2337,7 @@ impl E6App {
         ui.painter().rect_filled(
             map_rect,
             4.0,
-            egui::Color32::from_rgba_unmultiplied(18, 18, 26, 210),
+            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 235),
         );
         let step = elements.len().div_ceil(2000);
         for (index, element) in elements.iter().enumerate() {
@@ -2293,7 +2349,7 @@ impl E6App {
             ui.painter().rect_filled(
                 egui::Rect::from_two_pos(a, b),
                 0.0,
-                egui::Color32::from_rgba_unmultiplied(205, 205, 225, 150),
+                egui::Color32::from_rgba_unmultiplied(120, 120, 150, 150),
             );
         }
         let viewport_world = self.camera.viewport_aabb(Size::new(
@@ -2331,6 +2387,9 @@ impl E6App {
 
 impl eframe::App for E6App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Miro-light chrome: panels, menus, and widgets render light everywhere.
+        static LIGHT: std::sync::Once = std::sync::Once::new();
+        LIGHT.call_once(|| ui.ctx().set_theme(egui::Theme::Light));
         let now = Instant::now();
         if let Some(last) = self.last_frame {
             let delta_ms = now.duration_since(last).as_secs_f32() * 1000.0;

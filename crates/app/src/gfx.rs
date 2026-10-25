@@ -11,9 +11,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use eframe::wgpu;
 use vello::{AaConfig, RenderParams, Renderer, RendererOptions, Scene};
 
-/// Canvas background behind the board, drawn by vello itself.
+/// Canvas background behind the board, drawn by vello itself (Miro-light).
 fn base_color() -> vello::peniko::Color {
-    vello::peniko::Color::from_rgb8(0x17, 0x17, 0x1E)
+    vello::peniko::Color::from_rgb8(0xF5, 0xF5, 0xF7)
 }
 
 /// One frame's CPU-side work product, handed from `update` to the paint callback.
