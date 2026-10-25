@@ -11,7 +11,7 @@ use e6_doc::{BoardDoc, ElementSpec};
 use e6_editor::{Selection, Tool};
 use e6_render::build_display_list;
 use e6_scene::{
-    Aabb, Camera, Element, ElementId, ElementKind, MAX_ZOOM, MIN_ZOOM, Point, Size, demo_board,
+    Aabb, Camera, Element, ElementId, ElementKind, MAX_ZOOM, MIN_ZOOM, Point, Size, welcome_board,
 };
 use e6_ui::{
     DrawerTab, HudAvailability, HudCommand, HudState, draw_canvas_text, draw_status_bar,
@@ -21,9 +21,6 @@ use vello::Scene;
 
 use crate::gfx::{FrameJob, Gfx, VelloCallback};
 use crate::storage;
-
-/// Elements in the demo board a fresh install starts with.
-const DEMO_ELEMENT_COUNT: u32 = 2_500;
 
 /// Exponential-moving-average weight for the frame-time readout.
 const FRAME_EMA_WEIGHT: f32 = 0.1;
@@ -547,7 +544,7 @@ impl E6App {
         if self.doc.seeded() {
             return;
         }
-        for element in demo_board(DEMO_ELEMENT_COUNT) {
+        for element in welcome_board() {
             if let Err(err) = self.doc.insert_element(&ElementSpec::of(&element)) {
                 log::error!("demo seed insert failed: {err}");
             }

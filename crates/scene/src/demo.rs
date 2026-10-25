@@ -54,6 +54,128 @@ pub fn torture_board() -> Vec<Element> {
     demo_board(10_000)
 }
 
+/// The first-run board: a small, hand-designed welcome instead of the random
+/// perf scatter. Dark-canvas palette; light text.
+pub fn welcome_board() -> Vec<Element> {
+    const INK: u32 = 0xFFE8_E8F5;
+    const MUTED: u32 = 0xFF9A_9AB0;
+    const ACCENT: u32 = 0xFF4C_8DEF;
+
+    let mut elements = Vec::new();
+    let mut add = |mut element: Element| {
+        element.id = ElementId::from_raw(elements.len() as u64 + 1);
+        elements.push(element);
+    };
+
+    add(Element::new(
+        ElementId::from_raw(1),
+        ElementKind::Text,
+        Aabb::from_min_size(Point::new(40.0, 40.0), Size::new(560.0, 56.0)),
+        INK,
+    )
+    .with_text("Welcome to e6paint".to_owned(), 40.0));
+
+    add(Element::new(
+        ElementId::from_raw(2),
+        ElementKind::Text,
+        Aabb::from_min_size(Point::new(40.0, 110.0), Size::new(660.0, 28.0)),
+        MUTED,
+    )
+    .with_text(
+        "An infinite canvas for diagrams. Draw with the tool rail on the left.".to_owned(),
+        18.0,
+    ));
+
+    // A frame with members: created inside, moved together.
+    add(Element::new(
+        ElementId::from_raw(3),
+        ElementKind::Frame,
+        Aabb::from_min_size(Point::new(40.0, 170.0), Size::new(340.0, 250.0)),
+        ACCENT,
+    )
+    .with_text("Try it".to_owned(), 20.0)
+    .outlined(ACCENT, 2.0));
+
+    add(Element::new(
+        ElementId::from_raw(4),
+        ElementKind::Sticky,
+        Aabb::from_min_size(Point::new(60.0, 220.0), Size::new(130.0, 95.0)),
+        0xFFE0_6644,
+    )
+    .with_text("Digits 1-9 pick tools".to_owned(), 16.0));
+
+    add(Element::new(
+        ElementId::from_raw(5),
+        ElementKind::Rect,
+        Aabb::from_min_size(Point::new(220.0, 230.0), Size::new(120.0, 80.0)),
+        0xFF1D_1D2B,
+    )
+    .with_text("Drag me".to_owned(), 16.0)
+    .outlined(0xFF8A_8AA8, 2.0));
+
+    // Connector: rect -> ellipse, demonstrating arrows.
+    add(Element::new(
+        ElementId::from_raw(6),
+        ElementKind::Connector,
+        Aabb::from_min_size(Point::new(340.0, 265.0), Size::new(70.0, 20.0)),
+        MUTED,
+    )
+    .with_points(vec![Point::new(345.0, 270.0), Point::new(405.0, 280.0)]));
+
+    add(Element::new(
+        ElementId::from_raw(7),
+        ElementKind::Ellipse,
+        Aabb::from_min_size(Point::new(408.0, 255.0), Size::new(90.0, 65.0)),
+        0xFF2E_5E4E,
+    )
+    .with_text("fun".to_owned(), 16.0)
+    .outlined(MUTED, 2.0));
+
+    add(Element::new(
+        ElementId::from_raw(8),
+        ElementKind::Text,
+        Aabb::from_min_size(Point::new(440.0, 170.0), Size::new(420.0, 28.0)),
+        INK,
+    )
+    .with_text(
+        "Multiplayer: top bar -> Share -> open the link on another device.".to_owned(),
+        18.0,
+    ));
+
+    add(Element::new(
+        ElementId::from_raw(9),
+        ElementKind::Text,
+        Aabb::from_min_size(Point::new(440.0, 210.0), Size::new(420.0, 28.0)),
+        MUTED,
+    )
+    .with_text(
+        "Diagrams from code: the mol tab in the drawer, cmd/ctrl+Enter renders.".to_owned(),
+        18.0,
+    ));
+
+    add(Element::new(
+        ElementId::from_raw(10),
+        ElementKind::Text,
+        Aabb::from_min_size(Point::new(440.0, 250.0), Size::new(420.0, 28.0)),
+        MUTED,
+    )
+    .with_text(
+        "Export: cmd/ctrl+E for SVG (+shift for PNG).".to_owned(),
+        18.0,
+    ));
+
+    add(Element::new(
+        ElementId::from_raw(11),
+        ElementKind::Text,
+        Aabb::from_min_size(Point::new(440.0, 290.0), Size::new(420.0, 28.0)),
+        MUTED,
+    )
+    .with_text("Everything autosaves in this browser.".to_owned(), 18.0));
+
+    let _ = add; // closure used above
+    elements
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

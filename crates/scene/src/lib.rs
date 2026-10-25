@@ -10,7 +10,7 @@ pub mod geom;
 pub mod index;
 
 pub use camera::{Camera, MAX_ZOOM, MIN_ZOOM};
-pub use demo::{demo_board, torture_board};
+pub use demo::{demo_board, torture_board, welcome_board};
 pub use element::{Element, ElementId, ElementKind, ImageAsset};
 pub use geom::{Aabb, Point, Size};
 pub use index::{NaiveIndex, SpatialIndex};
