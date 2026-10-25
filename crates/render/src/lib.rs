@@ -113,7 +113,7 @@ pub fn build_display_list(
         visible: 0,
     };
     for element in elements {
-        if element.hidden || !element.bounds.intersects(visible_region) {
+        if element.hidden || !rotated_region_aabb(element).intersects(visible_region) {
             continue;
         }
         let lod = lod_for(camera, element.bounds);
@@ -121,15 +121,17 @@ pub fn build_display_list(
             continue;
         }
         let brush = brush_for(element.color);
+        let transform = element_transform(camera, element);
         if lod == Lod::Placeholder {
             let rect = screen_rect(camera, element.bounds);
-            scene.fill(Fill::NonZero, Affine::IDENTITY, &brush, None, &rect);
+            scene.fill(Fill::NonZero, transform, &brush, None, &rect);
             stats.visible += 1;
             continue;
         }
+        let transform = element_transform(camera, element);
         match element.kind {
-            ElementKind::Stroke => draw_stroke(scene, camera, element),
-            ElementKind::Connector => draw_connector(scene, camera, element),
+            ElementKind::Stroke => draw_stroke(scene, camera, element, transform),
+            ElementKind::Connector => draw_connector(scene, camera, element, transform),
             ElementKind::Sector => {
                 // Slice geometry arrives as a polygon in element points; fill it closed.
                 let mut polygon: Vec<Point> = element.points.clone();
@@ -137,13 +139,13 @@ pub fn build_display_list(
                     polygon.push(first);
                 }
                 let path = closed_path(polygon);
-                scene.fill(Fill::NonZero, Affine::IDENTITY, &brush, None, &path);
+                scene.fill(Fill::NonZero, transform, &brush, None, &path);
             }
-            ElementKind::Image => draw_image(scene, camera, element),
+            ElementKind::Image => draw_image(scene, camera, element, transform),
             ElementKind::Sticky => {
                 let rect = screen_rect(camera, element.bounds);
                 let card = RoundedRect::from_rect(rect, 8.0);
-                scene.fill(Fill::NonZero, Affine::IDENTITY, &brush, None, &card);
+                scene.fill(Fill::NonZero, transform, &brush, None, &card);
             }
             ElementKind::Ellipse => {
                 let polygon = ellipse_polygon(camera, element.bounds);
@@ -194,16 +196,17 @@ fn paint_sketchable(
     sketch: bool,
     seed: u64,
 ) {
+    let transform = element_transform(camera, element);
     let shape = if sketch {
         closed_path(rough_polygon(polygon, seed, SKETCH_JITTER_PX))
     } else {
         closed_path(polygon)
     };
-    paint_outline_or_fill(scene, camera, element, brush, &shape);
+    paint_outline_or_fill(scene, camera, element, brush, &shape, transform);
 }
 
 /// Draw a decoded image scaled into the element's screen rect.
-fn draw_image(scene: &mut Scene, camera: &Camera, element: &Element) {
+fn draw_image(scene: &mut Scene, camera: &Camera, element: &Element, transform: Affine) {
     let Some(asset) = element.image.as_ref() else {
         return;
     };
@@ -221,12 +224,12 @@ fn draw_image(scene: &mut Scene, camera: &Camera, element: &Element) {
         height: asset.height,
     };
     let brush = peniko::ImageBrush::new(image_data);
-    let transform = Affine::translate((rect.x0, rect.y0))
+    let local = Affine::translate((rect.x0, rect.y0))
         * Affine::scale_non_uniform(
             rect.width() / f64::from(asset.width),
             rect.height() / f64::from(asset.height),
         );
-    scene.draw_image(&brush, transform);
+    scene.draw_image(&brush, transform * local);
 }
 
 /// Polygon sampled around the ellipse inscribed in `bounds` (screen space).
@@ -301,17 +304,18 @@ fn paint_outline_or_fill(
     element: &Element,
     brush: &Brush,
     shape: &impl Shape,
+    transform: Affine,
 ) {
     if element.stroke_width > 0.0 {
         let style = Stroke::new(screen_width(camera, element.stroke_width));
         let outline = brush_for(element.stroke_color);
-        scene.stroke(&style, Affine::IDENTITY, &outline, None, shape);
+        scene.stroke(&style, transform, &outline, None, shape);
     } else {
-        scene.fill(Fill::NonZero, Affine::IDENTITY, brush, None, shape);
+        scene.fill(Fill::NonZero, transform, brush, None, shape);
     }
 }
 
-fn draw_stroke(scene: &mut Scene, camera: &Camera, element: &Element) {
+fn draw_stroke(scene: &mut Scene, camera: &Camera, element: &Element, transform: Affine) {
     let mut path = BezPath::new();
     for (index, point) in element.points.iter().enumerate() {
         let screen = camera.world_to_screen(*point);
@@ -329,10 +333,10 @@ fn draw_stroke(scene: &mut Scene, camera: &Camera, element: &Element) {
     };
     let style = Stroke::new(screen_width(camera, width).max(MIN_STROKE_PX));
     let outline = brush_for(element.stroke_color);
-    scene.stroke(&style, Affine::IDENTITY, &outline, None, &path);
+    scene.stroke(&style, transform, &outline, None, &path);
 }
 
-fn draw_connector(scene: &mut Scene, camera: &Camera, element: &Element) {
+fn draw_connector(scene: &mut Scene, camera: &Camera, element: &Element, transform: Affine) {
     let (Some(start), Some(end)) = (element.points.first(), element.points.get(1)) else {
         return;
     };
@@ -348,7 +352,7 @@ fn draw_connector(scene: &mut Scene, camera: &Camera, element: &Element) {
     };
     let style = Stroke::new(screen_width(camera, width).max(MIN_STROKE_PX));
     let outline = brush_for(element.stroke_color);
-    scene.stroke(&style, Affine::IDENTITY, &outline, None, &path);
+    scene.stroke(&style, transform, &outline, None, &path);
 
     // Arrowhead at the end: a filled triangle aligned with the line direction.
     let (dx, dy) = (f64::from(b.x - a.x), f64::from(b.y - a.y));
@@ -366,13 +370,62 @@ fn draw_connector(scene: &mut Scene, camera: &Camera, element: &Element) {
     head_path.line_to(KurboPoint::new(base.x - uy * half, base.y + ux * half));
     head_path.line_to(KurboPoint::new(base.x + uy * half, base.y - ux * half));
     head_path.close_path();
-    scene.fill(Fill::NonZero, Affine::IDENTITY, &outline, None, &head_path);
+    scene.fill(Fill::NonZero, transform, &outline, None, &head_path);
 }
 
 /// Map a world point to canvas-local screen pixels (vello draws in that space).
 fn screen_pos(camera: &Camera, world: Point) -> KurboPoint {
     let screen = camera.world_to_screen(world);
     KurboPoint::new(f64::from(screen.x), f64::from(screen.y))
+}
+
+/// Transform for one element: rotation about its screen-space bounds center.
+/// Identity for unrotated elements.
+fn element_transform(camera: &Camera, element: &Element) -> Affine {
+    if element.rotation == 0.0 {
+        return Affine::IDENTITY;
+    }
+    let center = element.bounds.center();
+    let center_screen = camera.world_to_screen(center);
+    Affine::rotate_about(
+        f64::from(element.rotation),
+        KurboPoint::new(f64::from(center_screen.x), f64::from(center_screen.y)),
+    )
+}
+
+/// World-space AABB of the rotated bounds (for culling and hover).
+fn rotated_region_aabb(element: &Element) -> Aabb {
+    if element.rotation == 0.0 {
+        return element.bounds;
+    }
+    let center = element.bounds.center();
+    let angle = f64::from(element.rotation);
+    let (sin, cos) = angle.sin_cos();
+    let half_w = f64::from(element.bounds.size().width) / 2.0;
+    let half_h = f64::from(element.bounds.size().height) / 2.0;
+    // Corner offsets rotated about the center, in world units.
+    let corners = [
+        (-half_w, -half_h),
+        (half_w, -half_h),
+        (-half_w, half_h),
+        (half_w, half_h),
+    ];
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for (dx, dy) in corners {
+        let rx = dx * cos - dy * sin;
+        let ry = dx * sin + dy * cos;
+        min_x = min_x.min(f64::from(center.x) + rx);
+        min_y = min_y.min(f64::from(center.y) + ry);
+        max_x = max_x.max(f64::from(center.x) + rx);
+        max_y = max_y.max(f64::from(center.y) + ry);
+    }
+    Aabb::from_min_size(
+        Point::new(min_x as f32, min_y as f32),
+        Size::new((max_x - min_x) as f32, (max_y - min_y) as f32),
+    )
 }
 
 fn screen_rect(camera: &Camera, bounds: Aabb) -> Rect {

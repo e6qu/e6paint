@@ -57,8 +57,8 @@ pub fn torture_board() -> Vec<Element> {
 /// The first-run board: a small, hand-designed welcome instead of the random
 /// perf scatter. Dark-canvas palette; light text.
 pub fn welcome_board() -> Vec<Element> {
-    const INK: u32 = 0xFFE8_E8F5;
-    const MUTED: u32 = 0xFF9A_9AB0;
+    const INK: u32 = 0xFF1A_1A2E;
+    const MUTED: u32 = 0xFF6F_6F85;
     const ACCENT: u32 = 0xFF4C_8DEF;
 
     let mut elements = Vec::new();
@@ -108,7 +108,7 @@ pub fn welcome_board() -> Vec<Element> {
         ElementId::from_raw(5),
         ElementKind::Rect,
         Aabb::from_min_size(Point::new(220.0, 230.0), Size::new(120.0, 80.0)),
-        0xFF1D_1D2B,
+        0xFFFF_FFFF,
     )
     .with_text("Drag me".to_owned(), 16.0)
     .outlined(0xFF8A_8AA8, 2.0));

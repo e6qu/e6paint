@@ -119,7 +119,7 @@ pub struct HudState {
 }
 
 /// Button availability in the action bar.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HudAvailability {
     pub can_undo: bool,
     pub can_redo: bool,
@@ -133,12 +133,14 @@ pub struct HudAvailability {
 }
 
 /// A command the user pressed in the action bar.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HudCommand {
     None,
     Undo,
     Redo,
     Reset,
+    /// Rotate the selection by the given delta (radians; negative = clockwise).
+    Rotate(f32),
     ExportJson,
     BringToFront,
     SendToBack,
@@ -379,6 +381,25 @@ pub fn draw_top_bar(
                         .clicked()
                     {
                         command = HudCommand::ToggleLock;
+                    }
+                    menu.separator();
+                    if menu
+                        .add_enabled(
+                            availability.has_selection,
+                            egui::Button::new("Rotate 90° clockwise"),
+                        )
+                        .clicked()
+                    {
+                        command = HudCommand::Rotate(std::f32::consts::FRAC_PI_2);
+                    }
+                    if menu
+                        .add_enabled(
+                            availability.has_selection,
+                            egui::Button::new("Rotate 90° counter-clockwise"),
+                        )
+                        .clicked()
+                    {
+                        command = HudCommand::Rotate(-std::f32::consts::FRAC_PI_2);
                     }
                     menu.separator();
                     if menu

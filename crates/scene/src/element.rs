@@ -70,6 +70,8 @@ pub struct Element {
     /// Hidden elements are invisible and unselectable on canvas; the layers panel
     /// toggles them.
     pub hidden: bool,
+    /// Rotation in radians, counter-clockwise about the bounds center.
+    pub rotation: f32,
     /// Decoded image payload (Arc'd so per-frame board clones stay cheap).
     pub image: Option<ImageAsset>,
     /// Generator provenance key (e.g. `mol:0:gate`), used by re-apply to match
@@ -98,6 +100,7 @@ impl Element {
             points: Vec::new(),
             text: String::new(),
             font_size: 24.0,
+            rotation: 0.0,
             group: None,
             frame: None,
             locked: false,

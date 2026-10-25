@@ -528,7 +528,9 @@ impl E6App {
             match storage::web::load_snapshot().await {
                 Ok(Some(bytes)) => match BoardDoc::from_snapshot(&bytes) {
                     Ok(doc) => {
-                        if let Ok(mut slot) = inbox.lock() {
+                        if Self::is_stale_demo(&doc) {
+                            log::info!("saved board is the old demo; starting fresh");
+                        } else if let Ok(mut slot) = inbox.lock() {
                             *slot = Some(RestoreOutcome::Restored(doc));
                         }
                     }
@@ -586,8 +588,15 @@ impl E6App {
         match storage::native::load(&path) {
             Ok(Some(bytes)) => match BoardDoc::from_snapshot(&bytes) {
                 Ok(doc) => {
-                    log::info!("restored board from {}", path.display());
-                    self.replace_doc(doc);
+                    if Self::is_stale_demo(&doc) {
+                        log::info!(
+                            "saved board at {} is the old demo; starting fresh",
+                            path.display()
+                        );
+                    } else {
+                        log::info!("restored board from {}", path.display());
+                        self.replace_doc(doc);
+                    }
                 }
                 Err(err) => log::error!(
                     "snapshot at {} is unusable ({err}); starting fresh",
@@ -811,6 +820,7 @@ impl E6App {
                 self.dirty = true;
             }
             HudCommand::Align(mode) => self.apply_align(mode),
+            HudCommand::Rotate(delta) => self.rotate_selection(delta),
             HudCommand::ExportJson => self.export_json(),
             HudCommand::ExportSvg => self.export_svg(),
             HudCommand::ExportPng => self.export_png(),
@@ -1659,6 +1669,13 @@ impl E6App {
             return;
         }
 
+        // R rotates the selection 15° clockwise (Miro-style increments).
+        if !self.selection.is_empty()
+            && Self::key_pressed_with_modifiers(ctx, egui::Key::R).is_some()
+        {
+            self.rotate_selection(15_f32.to_radians());
+        }
+
         // cmd/ctrl+D duplicates the selection, offset by 24 pt.
         if let Some(modifiers) = d
             && (modifiers.command || modifiers.ctrl)
@@ -1814,6 +1831,18 @@ impl E6App {
         }
     }
 
+    /// A saved board matching the pre-1.0 demo scatter signature: thousands of
+    /// Rect/Ellipse elements with no text. Such autosaves predate the welcome
+    /// board and are replaced instead of restored.
+    fn is_stale_demo(doc: &BoardDoc) -> bool {
+        let elements = doc.elements();
+        elements.len() >= 2_000
+            && elements
+                .iter()
+                .all(|e| matches!(e.kind, ElementKind::Rect | ElementKind::Ellipse))
+            && elements.iter().all(|e| e.text.is_empty())
+    }
+
     /// Union bounds of the selected elements.
     fn selection_bounds(&self) -> Option<Aabb> {
         let elements = self.doc.elements();
@@ -1828,6 +1857,20 @@ impl E6App {
             });
         }
         bounds
+    }
+
+    /// Rotate every selected element by `delta` radians (counter-clockwise).
+    fn rotate_selection(&mut self, delta: f32) {
+        let elements = self.doc.elements();
+        for id in self.selection.iter() {
+            if let Some(element) = elements.iter().find(|e| e.id == id)
+                && let Err(err) = self.doc.set_rotation(id, element.rotation + delta)
+            {
+                log::error!("rotate failed: {err}");
+            }
+        }
+        self.doc.commit();
+        self.dirty = true;
     }
 
     /// Duplicate every selected element, offset by 24 pt, and select the copies.
@@ -2503,7 +2546,7 @@ impl E6App {
                 egui::Pos2::new(max.x / pixels_per_point, max.y / pixels_per_point),
             );
             painter.rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Middle);
-            if count == 1 {
+            if count == 1 && element.rotation.abs() < 0.01 {
                 // Eight handles: four corners + four edge midpoints, matching
                 // editor::resize::handle_at.
                 for corner in [

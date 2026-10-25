@@ -38,6 +38,8 @@ pub struct ElementSpec {
     pub points: Vec<Point>,
     pub text: String,
     pub font_size: f32,
+    /// Rotation in radians, counter-clockwise, about the bounds center.
+    pub rotation: f32,
     /// Generator provenance key (e.g. `mol:0:gate`).
     pub provenance: Option<String>,
 }
@@ -54,6 +56,7 @@ impl ElementSpec {
             points: Vec::new(),
             text: String::new(),
             font_size: 24.0,
+            rotation: 0.0,
             provenance: None,
         }
     }
@@ -75,6 +78,7 @@ impl ElementSpec {
             points: element.points.clone(),
             text: element.text.clone(),
             font_size: element.font_size,
+            rotation: element.rotation,
             provenance: element.provenance.clone(),
         }
     }
@@ -96,6 +100,12 @@ impl ElementSpec {
     pub fn with_text(mut self, text: String, font_size: f32) -> Self {
         self.text = text;
         self.font_size = font_size;
+        self
+    }
+
+    /// Builder: rotation in radians (counter-clockwise, about the bounds center).
+    pub fn with_rotation(mut self, rotation: f32) -> Self {
+        self.rotation = rotation;
         self
     }
 }
@@ -408,6 +418,7 @@ impl BoardDoc {
         element.insert("stroke_color", i64::from(spec.stroke_color))?;
         element.insert("stroke_width", f64::from(spec.stroke_width))?;
         element.insert("font_size", f64::from(spec.font_size))?;
+        element.insert("rot", f64::from(spec.rotation))?;
         if !spec.points.is_empty() {
             element.insert("points", flat_points(&spec.points))?;
         }
@@ -432,6 +443,7 @@ impl BoardDoc {
                     kind: spec.kind,
                     bounds: spec.bounds,
                     color: spec.color,
+                    rotation: spec.rotation,
                     stroke_color: spec.stroke_color,
                     stroke_width: spec.stroke_width,
                     points: spec.points.clone(),
@@ -450,6 +462,21 @@ impl BoardDoc {
     }
 
     /// Overwrite an element's bounds. No commit — group per gesture.
+    /// Set an element's rotation (radians, counter-clockwise about its center).
+    pub fn set_rotation(&self, id: ElementId, rotation: f32) -> Result<(), DocError> {
+        let element = self.element_container(&id_key(id))?;
+        element.insert("rot", f64::from(rotation))?;
+        self.state
+            .lock()
+            .map(|mut state| {
+                if let Some(slot) = state.elements.iter_mut().find(|e| e.id == id) {
+                    slot.rotation = rotation;
+                }
+            })
+            .map_err(|_| DocError::Corrupt("state mutex poisoned".into()))?;
+        Ok(())
+    }
+
     pub fn set_geometry(&self, id: ElementId, bounds: Aabb) -> Result<(), DocError> {
         let key = id_key(id);
         let element = self.element_container(&key)?;
@@ -564,6 +591,7 @@ impl BoardDoc {
                     id,
                     kind: ElementKind::Image,
                     bounds,
+                    rotation: 0.0,
                     color: 0xFFFF_FFFF,
                     stroke_color: 0xFFFF_FFFF,
                     stroke_width: 0.0,
@@ -1000,6 +1028,10 @@ fn build_element(key: &str, slot: loro::ValueOrContainer) -> Result<Element, Doc
         Some(_) => return Err(DocError::Corrupt(format!("{key:?} frame is not a string"))),
         None => None,
     };
+    let rotation = match fields.get("rot") {
+        Some(LoroValue::Double(raw)) => *raw as f32,
+        _ => 0.0,
+    };
     let locked = matches!(fields.get("locked"), Some(LoroValue::Bool(true)));
     let hidden = matches!(fields.get("hidden"), Some(LoroValue::Bool(true)));
     let provenance = match fields.get("prov") {
@@ -1024,6 +1056,7 @@ fn build_element(key: &str, slot: loro::ValueOrContainer) -> Result<Element, Doc
         font_size,
         group,
         frame,
+        rotation,
         locked,
         hidden,
         provenance,
