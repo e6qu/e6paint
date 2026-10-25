@@ -7,6 +7,7 @@ use egui_kittest::{Harness, kittest::Queryable};
 
 fn hud_state() -> HudState {
     HudState {
+        title: "Untitled board".to_owned(),
         zoom: 1.0,
         visible_elements: 3,
         total_elements: 3,
@@ -52,6 +53,10 @@ fn undo_and_redo_buttons_dispatch_commands() {
         },
         state,
     );
+
+    // The board name is rendered as a labeled node in the top bar.
+    harness.get_by_label("Untitled board").click();
+    harness.run();
 
     harness.get_by_label("Undo").click();
     harness.run();

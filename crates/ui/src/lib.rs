@@ -103,6 +103,8 @@ pub fn draw_layers_content(
 /// What the status HUD shows.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HudState {
+    /// Board title, shown in the top bar.
+    pub title: String,
     /// Camera zoom as screen pixels per world unit.
     pub zoom: f32,
     pub visible_elements: usize,
@@ -316,6 +318,8 @@ pub fn draw_top_bar(
         )
         .show(ui, |bar| {
             bar.horizontal(|bar| {
+                bar.strong(&state.title);
+                bar.separator();
                 if bar
                     .add_enabled(availability.can_undo, egui::Button::new("Undo"))
                     .clicked()
@@ -540,6 +544,7 @@ mod tests {
     #[test]
     fn status_line_mentions_zoom_visibility_selection_and_frametime() {
         let line = format_status(&HudState {
+            title: "Untitled board".to_owned(),
             notice: None,
             notice_until: None,
             zoom: 1.5,

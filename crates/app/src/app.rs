@@ -292,6 +292,7 @@ impl E6App {
             gfx,
             frame_job: Arc::new(Mutex::new(None)),
             hud: HudState {
+                title: "Untitled board".to_owned(),
                 zoom: 1.0,
                 visible_elements: 0,
                 total_elements: 0,
@@ -2240,9 +2241,56 @@ impl E6App {
             );
         }
 
+        self.draw_selection_overlay(ui, rect, pixels_per_point);
+
         self.draw_minimap(ui, rect, pixels_per_point);
         self.draw_zoom_widget(ui, rect);
         draw_status_bar(ui, &self.hud);
+    }
+
+    /// Selection chrome: Figma-blue outlines on every selected element, drag
+    /// handles on single selection. Drawn above the scene so a click always
+    /// shows what it hit.
+    fn draw_selection_overlay(
+        &mut self,
+        ui: &mut egui::Ui,
+        canvas_rect: egui::Rect,
+        pixels_per_point: f32,
+    ) {
+        if self.selection.is_empty() {
+            return;
+        }
+        let painter = ui.painter_at(canvas_rect);
+        let stroke = egui::Stroke::new(
+            1.5 * pixels_per_point,
+            egui::Color32::from_rgb(13, 153, 255),
+        );
+        let count = self.selection.len();
+        let elements = self.doc.elements();
+        for id in self.selection.iter() {
+            let Some(element) = elements.iter().find(|e| e.id == id) else {
+                continue;
+            };
+            let min = self.camera.world_to_screen(element.bounds.min);
+            let max = self.camera.world_to_screen(element.bounds.max);
+            let rect = egui::Rect::from_two_pos(
+                egui::Pos2::new(min.x / pixels_per_point, min.y / pixels_per_point),
+                egui::Pos2::new(max.x / pixels_per_point, max.y / pixels_per_point),
+            );
+            painter.rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Middle);
+            if count == 1 {
+                for corner in [
+                    rect.left_top(),
+                    rect.right_top(),
+                    rect.left_bottom(),
+                    rect.right_bottom(),
+                ] {
+                    let handle = egui::Rect::from_center_size(corner, egui::Vec2::splat(8.0));
+                    painter.rect_filled(handle, 2.0, egui::Color32::WHITE);
+                    painter.rect_stroke(handle, 2.0, stroke, egui::StrokeKind::Middle);
+                }
+            }
+        }
     }
 
     /// Bottom-left zoom widget, Miro-style: zoom out, percentage, zoom in, fit.
@@ -2576,6 +2624,7 @@ impl eframe::App for E6App {
         if let Some(picked) = draw_tool_bar(ui, self.tool) {
             self.apply_tool(picked);
         }
+        self.hud.title = self.doc.title();
         let availability = HudAvailability {
             can_undo: self.doc.can_undo(),
             can_redo: self.doc.can_redo(),
