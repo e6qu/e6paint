@@ -2416,6 +2416,10 @@ impl E6App {
                     | e6_editor::resize::ResizeHandle::SouthEast => egui::CursorIcon::ResizeNwSe,
                     e6_editor::resize::ResizeHandle::NorthEast
                     | e6_editor::resize::ResizeHandle::SouthWest => egui::CursorIcon::ResizeNeSw,
+                    e6_editor::resize::ResizeHandle::North
+                    | e6_editor::resize::ResizeHandle::South => egui::CursorIcon::ResizeVertical,
+                    e6_editor::resize::ResizeHandle::East
+                    | e6_editor::resize::ResizeHandle::West => egui::CursorIcon::ResizeHorizontal,
                 };
                 ui.ctx().set_cursor_icon(cursor);
                 return;
@@ -2500,11 +2504,17 @@ impl E6App {
             );
             painter.rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Middle);
             if count == 1 {
+                // Eight handles: four corners + four edge midpoints, matching
+                // editor::resize::handle_at.
                 for corner in [
                     rect.left_top(),
+                    rect.center_top(),
                     rect.right_top(),
-                    rect.left_bottom(),
+                    rect.right_center(),
                     rect.right_bottom(),
+                    rect.center_bottom(),
+                    rect.left_bottom(),
+                    rect.left_center(),
                 ] {
                     let handle = egui::Rect::from_center_size(corner, egui::Vec2::splat(8.0));
                     painter.rect_filled(handle, 2.0, egui::Color32::WHITE);
