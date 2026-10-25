@@ -1831,6 +1831,14 @@ impl E6App {
             self.editing = Some(element.id);
             return;
         }
+        // Miro convention: double-click empty canvas drops a sticky and opens it.
+        if response.double_clicked()
+            && let Some(world) = self.world_at(response, pixels_per_point)
+            && self.topmost_at(world).is_none()
+        {
+            self.place_sticky_at(world);
+            return;
+        }
         if response.drag_started()
             && let Some(press_world) = self.world_at(response, pixels_per_point)
         {
@@ -2065,6 +2073,26 @@ impl E6App {
         }
     }
 
+    /// Miro convention: double-click empty canvas drops a sticky and opens it.
+    fn place_sticky_at(&mut self, world: Point) {
+        let spec = ElementSpec::simple(
+            ElementKind::Sticky,
+            Aabb::from_min_size(world, Size::new(STICKY_SIZE, STICKY_SIZE)),
+            STICKY_FILL,
+        );
+        match self.doc.insert_element(&spec) {
+            Ok(id) => {
+                self.doc.commit();
+                self.dirty = true;
+                self.selection.set([id]);
+                self.editing = Some(id);
+                self.editing_focused = false;
+                self.tool = Tool::Select;
+            }
+            Err(err) => log::error!("sticky placement failed: {err}"),
+        }
+    }
+
     fn finish_creation(&mut self, spec: ElementSpec) {
         match self.doc.insert_element(&spec) {
             Ok(id) => {
@@ -2216,6 +2244,35 @@ impl E6App {
                     cursor.name.as_str(),
                     egui::FontId::proportional(12.0),
                     tint,
+                );
+            }
+        }
+
+        // Hover affordance: the element the cursor would grab lights up before
+        // the click (Select tool only, not while dragging or space-panning).
+        if self.tool == Tool::Select
+            && self.drag.is_none()
+            && !ui.input(|i| i.key_down(egui::Key::Space))
+            && let Some(pos) = ui.input(|i| i.pointer.hover_pos())
+        {
+            let world = canvas_pos_in(rect, pos, pixels_per_point);
+            if let Some(element) = self.topmost_at(world)
+                && !self.selection.contains(element.id)
+            {
+                let min = self.camera.world_to_screen(element.bounds.min);
+                let max = self.camera.world_to_screen(element.bounds.max);
+                let hover_rect = egui::Rect::from_two_pos(
+                    egui::Pos2::new(min.x / pixels_per_point, min.y / pixels_per_point),
+                    egui::Pos2::new(max.x / pixels_per_point, max.y / pixels_per_point),
+                );
+                ui.painter().rect_stroke(
+                    hover_rect,
+                    0.0,
+                    egui::Stroke::new(
+                        1.5 * pixels_per_point,
+                        egui::Color32::from_rgb(90, 145, 255),
+                    ),
+                    egui::StrokeKind::Middle,
                 );
             }
         }
