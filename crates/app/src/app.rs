@@ -75,6 +75,7 @@ struct CollabSession {
     /// A ping without a pong inside the timeout means the transport is dead.
     last_ping_sent: Option<Instant>,
     last_pong_at: Option<Instant>,
+    /// Alignment guides from the current drag (Miro pink lines), world coords.
     remote_cursors: Vec<RemoteCursor>,
 }
 
@@ -218,6 +219,8 @@ pub struct E6App {
     last_viewport: Size,
     /// Canvas rect in egui points; anchor for the zoom widget.
     last_canvas_rect: Option<egui::Rect>,
+    /// Alignment guides from the current drag (Miro pink lines), world coords.
+    alignment_guides: Vec<AlignmentGuide>,
     /// A committed gesture is not yet autosaved.
     dirty: bool,
     /// mol code panel state (source text + last expansion errors).
@@ -249,6 +252,13 @@ pub struct E6App {
     #[cfg(target_arch = "wasm32")]
     #[allow(dead_code)]
     file_closure: Option<wasm_bindgen::closure::Closure<dyn FnMut()>>,
+}
+
+/// One alignment guide line from a drag snap, in world coordinates.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum AlignmentGuide {
+    Vertical(f32),
+    Horizontal(f32),
 }
 
 /// Pointer position in canvas-local physical pixels: the camera's screen space
@@ -310,6 +320,7 @@ impl E6App {
             drawer_tab: DrawerTab::Library,
             last_viewport: Size::new(1.0, 1.0),
             last_canvas_rect: None,
+            alignment_guides: Vec::new(),
             dirty: false,
             code_panel: e6_ui::CodePanelState::default(),
             mol_applied: None,
@@ -1578,6 +1589,7 @@ impl E6App {
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
         let z = Self::key_pressed_with_modifiers(ctx, egui::Key::Z);
         let y = Self::key_pressed_with_modifiers(ctx, egui::Key::Y);
+        let d = Self::key_pressed_with_modifiers(ctx, egui::Key::D);
         let e = Self::key_pressed_with_modifiers(ctx, egui::Key::E);
         let enter = Self::key_pressed_with_modifiers(ctx, egui::Key::Enter);
         let delete = ctx.input(|input| {
@@ -1632,6 +1644,15 @@ impl E6App {
             self.doc.commit();
             self.dirty = true;
             self.selection.clear();
+            return;
+        }
+
+        // cmd/ctrl+D duplicates the selection, offset by 24 pt.
+        if let Some(modifiers) = d
+            && (modifiers.command || modifiers.ctrl)
+            && !self.selection.is_empty()
+        {
+            self.duplicate_selection();
             return;
         }
 
@@ -1781,6 +1802,61 @@ impl E6App {
         }
     }
 
+    /// Union bounds of the selected elements.
+    fn selection_bounds(&self) -> Option<Aabb> {
+        let elements = self.doc.elements();
+        let mut bounds: Option<Aabb> = None;
+        for id in self.selection.iter() {
+            let Some(element) = elements.iter().find(|e| e.id == id) else {
+                continue;
+            };
+            bounds = Some(match bounds {
+                Some(existing) => existing.union(element.bounds),
+                None => element.bounds,
+            });
+        }
+        bounds
+    }
+
+    /// Duplicate every selected element, offset by 24 pt, and select the copies.
+    fn duplicate_selection(&mut self) {
+        let elements = self.doc.elements();
+        let mut new_ids = Vec::new();
+        for id in self.selection.iter() {
+            let Some(element) = elements.iter().find(|e| e.id == id) else {
+                continue;
+            };
+            let mut clone = element.clone();
+            clone.bounds = Aabb::from_min_size(
+                Point::new(clone.bounds.min.x + 24.0, clone.bounds.min.y + 24.0),
+                clone.bounds.size(),
+            );
+            for point in &mut clone.points {
+                point.x += 24.0;
+                point.y += 24.0;
+            }
+            match self.doc.insert_element(&ElementSpec::of(&clone)) {
+                Ok(new_id) => new_ids.push(new_id),
+                Err(err) => log::error!("duplicate failed: {err}"),
+            }
+        }
+        if !new_ids.is_empty() {
+            self.doc.commit();
+            self.dirty = true;
+            self.selection.set(new_ids);
+        }
+    }
+
+    /// Every element the dragged selection could align to (not itself selected).
+    fn alignment_candidates(&self, _moving: &Aabb) -> Vec<Aabb> {
+        self.doc
+            .elements()
+            .iter()
+            .filter(|e| !self.selection.contains(e.id))
+            .map(|e| e.bounds)
+            .collect()
+    }
+
     /// Select gestures are suppressed while space is held: space+drag pans (the
     /// Miro convention), regardless of the active tool.
     fn space_held(&self, response: &egui::Response) -> bool {
@@ -1874,8 +1950,29 @@ impl E6App {
             && let Some(drag) = self.drag.as_ref()
             && let Some(current) = self.world_at(response, pixels_per_point)
         {
-            let dx = current.x - drag.last_world.x;
-            let dy = current.y - drag.last_world.y;
+            let mut dx = current.x - drag.last_world.x;
+            let mut dy = current.y - drag.last_world.y;
+            // Miro-style alignment snapping to other elements' centers/edges.
+            if let Some(moving) = self.selection_bounds() {
+                const THRESHOLD: f32 = 6.0 / 1.0; // screen px; world threshold scaled below
+                let threshold = 6.0 / self.camera.zoom;
+                let _ = THRESHOLD;
+                let snap = e6_editor::align::snap_delta(
+                    moving,
+                    &self.alignment_candidates(&moving),
+                    dx,
+                    dy,
+                    threshold,
+                );
+                dx += snap.dx;
+                dy += snap.dy;
+                self.alignment_guides = snap
+                    .guides_x
+                    .into_iter()
+                    .map(AlignmentGuide::Vertical)
+                    .chain(snap.guides_y.into_iter().map(AlignmentGuide::Horizontal))
+                    .collect();
+            }
             let locked: Vec<ElementId> = self
                 .doc
                 .elements()

@@ -200,3 +200,129 @@ mod tests {
         Ok(())
     }
 }
+
+/// The outcome of one alignment-snap pass: adjusted drag deltas plus the world
+/// coordinates of the guide lines to draw (vertical guides are x values).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SnapResult {
+    pub dx: f32,
+    pub dy: f32,
+    pub guides_x: Vec<f32>,
+    pub guides_y: Vec<f32>,
+}
+
+/// Miro-style snapping: while dragging `moving` by `(dx, dy)`, align its center
+/// or edges to any other bounds' center/edges within `threshold` (screen px
+/// converted to world units by the caller). One guide per axis — the nearest.
+pub fn snap_delta(moving: Aabb, others: &[Aabb], dx: f32, dy: f32, threshold: f32) -> SnapResult {
+    let mut result = SnapResult {
+        dx,
+        dy,
+        ..Default::default()
+    };
+
+    let moving_center_x = moving.center().x + dx;
+    let moving_center_y = moving.center().y + dy;
+    let moving_left = moving.min.x + dx;
+    let moving_right = moving.max.x + dx;
+    let moving_top = moving.min.y + dy;
+    let moving_bottom = moving.max.y + dy;
+
+    let mut best_x: Option<(f32, f32, f32)> = None; // (|delta|, snap_dx, guide_x)
+    let mut best_y: Option<(f32, f32, f32)> = None;
+
+    for other in others {
+        let center_x = other.center().x;
+        for (moving_edge, other_edge) in [
+            (moving_center_x, center_x),
+            (moving_left, other.min.x),
+            (moving_right, other.max.x),
+            (moving_center_x, other.min.x),
+            (moving_center_x, other.max.x),
+            // Adjacent edges: the classic "snap flush against" case.
+            (moving_right, other.min.x),
+            (moving_left, other.max.x),
+        ] {
+            let delta = other_edge - moving_edge;
+            if delta.abs() <= threshold && best_x.is_none_or(|(best, _, _)| delta.abs() < best) {
+                best_x = Some((delta.abs(), delta, other_edge));
+            }
+        }
+
+        let center_y = other.center().y;
+        for (moving_edge, other_edge) in [
+            (moving_center_y, center_y),
+            (moving_top, other.min.y),
+            (moving_bottom, other.max.y),
+            (moving_center_y, other.min.y),
+            (moving_center_y, other.max.y),
+            (moving_bottom, other.min.y),
+            (moving_top, other.max.y),
+        ] {
+            let delta = other_edge - moving_edge;
+            if delta.abs() <= threshold && best_y.is_none_or(|(best, _, _)| delta.abs() < best) {
+                best_y = Some((delta.abs(), delta, other_edge));
+            }
+        }
+    }
+
+    if let Some((_, snap, guide)) = best_x {
+        result.dx += snap;
+        result.guides_x.push(guide);
+    }
+    if let Some((_, snap, guide)) = best_y {
+        result.dy += snap;
+        result.guides_y.push(guide);
+    }
+    result
+}
+
+#[cfg(test)]
+mod snap_tests {
+    use super::*;
+
+    fn rect(x: f32, y: f32) -> Aabb {
+        Aabb::from_min_size(Point::new(x, y), e6_scene::Size::new(100.0, 80.0))
+    }
+
+    #[test]
+    fn centers_snap_within_threshold() {
+        // dx=4 lands the moving center at 54; the other's center is at 54.
+        let moving = rect(0.0, 0.0);
+        let others = [rect(4.0, 30.0)];
+        let result = snap_delta(moving, &others, 4.0, 0.0, 6.0);
+        assert_eq!(result.dx, 4.0, "already aligned: no extra snap");
+        assert_eq!(result.guides_x, vec![54.0]);
+        assert!(result.guides_y.is_empty());
+    }
+
+    #[test]
+    fn beyond_threshold_no_snap() {
+        let moving = rect(0.0, 0.0);
+        let others = [rect(120.0, 0.0)];
+        let result = snap_delta(moving, &others, 4.0, 0.0, 6.0);
+        assert_eq!(result.dx, 4.0);
+        assert!(result.guides_x.is_empty());
+    }
+
+    #[test]
+    fn edges_snap_and_both_axes_independent() {
+        // dx=0 puts the moving right edge at 100; the other's left edge is at 96
+        // (4 px away): snaps so the edges touch.
+        let moving = rect(0.0, 0.0);
+        let others = [rect(96.0, 500.0)];
+        let result = snap_delta(moving, &others, 0.0, 0.0, 6.0);
+        assert_eq!(result.dx, -4.0);
+        assert_eq!(result.guides_x, vec![96.0]);
+    }
+
+    #[test]
+    fn nearest_candidate_wins() {
+        // dx=3 lands the moving center at 53; candidates at 54 and 56: 54 wins.
+        let moving = rect(0.0, 0.0);
+        let others = [rect(4.0, 0.0), rect(6.0, 0.0)];
+        let result = snap_delta(moving, &others, 3.0, 0.0, 6.0);
+        assert_eq!(result.dx, 4.0);
+        assert_eq!(result.guides_x, vec![54.0]);
+    }
+}
