@@ -70,7 +70,7 @@ Frame; digits **1–9** pick tools in that order) ·
 wheel = pan · pinch or cmd/ctrl+wheel = zoom at pointer · drag empty canvas = marquee ·
 space+drag = pan on any tool · double-click text/sticky = edit ·
 shift-click = add/remove from selection · drag selection = move (groups move together) ·
-Delete = remove · Esc = cancel · cmd/ctrl+Z undo (+shift/Y redo) ·
+Delete = remove · Esc = cancel · R = rotate selection 15° · cmd/ctrl+Z undo (+shift/Y redo) ·
 cmd/ctrl+Enter = expand the mol panel · cmd/ctrl+E = export SVG (ctrl+shift+E = PNG). The action bar has
 Align/Distribute, Group/Ungroup, Lock/Unlock, Sketch toggle, Front/Back, Undo/Redo,
 Reset, and Export JSON.

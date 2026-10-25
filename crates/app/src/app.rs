@@ -443,9 +443,7 @@ impl E6App {
         }
 
         let inbox = self.pending_image.clone();
-        log::info!("DIAG file picker: change handler armed");
         let closure = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
-            log::info!("DIAG file picker: change fired");
             let files = web_sys::window()
                 .and_then(|window| window.document())
                 .and_then(|document| document.get_element_by_id("e6_file_input"))
