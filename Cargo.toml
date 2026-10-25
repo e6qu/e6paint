@@ -53,7 +53,7 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
 proptest = "1"
 kittest = "0.5"
-egui_kittest = "0.37"
+egui_kittest = { version = "0.37", features = ["snapshot", "wgpu"] }
 web-time = "1"
 tokio-tungstenite = "0.29"
 futures-util = "0.3"
