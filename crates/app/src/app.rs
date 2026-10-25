@@ -138,6 +138,12 @@ struct DragState {
     last_world: Point,
 }
 
+/// An in-progress corner-resize gesture over a single selected element.
+struct ResizeState {
+    handle: e6_editor::resize::ResizeHandle,
+    original: Aabb,
+}
+
 /// An in-progress marquee selection (world-space corners).
 struct MarqueeState {
     start: Point,
@@ -191,6 +197,7 @@ pub struct E6App {
     selection: Selection,
     tool: Tool,
     drag: Option<DragState>,
+    resize: Option<ResizeState>,
     marquee: Option<MarqueeState>,
     draft: Option<Draft>,
     editing: Option<ElementId>,
@@ -293,6 +300,7 @@ impl E6App {
             tool: Tool::Select,
             drag: None,
             marquee: None,
+            resize: None,
             draft: None,
             editing: None,
             editing_focused: false,
@@ -676,6 +684,10 @@ impl E6App {
     fn fit_camera(&mut self, viewport: Size) {
         let elements = self.doc.elements();
         let Some(first) = elements.first() else {
+            // An empty board has nothing to fit: keep the default camera instead
+            // of retrying every frame (and never fit-jump onto the user's first
+            // stroke).
+            self.fitted = true;
             return;
         };
         let mut bounds = first.bounds;
@@ -1918,6 +1930,21 @@ impl E6App {
         if response.drag_started()
             && let Some(press_world) = self.world_at(response, pixels_per_point)
         {
+            // Corner handles (single selection) take precedence over moving.
+            if self.selection.len() == 1 {
+                let grab_world = 10.0 / self.camera.zoom.max(0.01);
+                if let Some(selected_id) = self.selection.iter().next()
+                    && let Some(element) = self.doc.elements().iter().find(|e| e.id == selected_id)
+                    && let Some(handle) =
+                        e6_editor::resize::handle_at(element.bounds, press_world, grab_world)
+                {
+                    self.resize = Some(ResizeState {
+                        handle,
+                        original: element.bounds,
+                    });
+                    return;
+                }
+            }
             match self.topmost_at(press_world) {
                 Some(element) => {
                     if shift {
@@ -1950,6 +1977,17 @@ impl E6App {
             && let Some(drag) = self.drag.as_ref()
             && let Some(current) = self.world_at(response, pixels_per_point)
         {
+            if let Some(resize) = self.resize.as_ref()
+                && let Some(selected_id) = self.selection.iter().next()
+            {
+                let bounds =
+                    e6_editor::resize::resize_bounds(resize.original, resize.handle, current);
+                if let Err(err) = self.doc.set_geometry(selected_id, bounds) {
+                    log::error!("resize failed: {err}");
+                }
+                return;
+            }
+
             let mut dx = current.x - drag.last_world.x;
             let mut dy = current.y - drag.last_world.y;
             // Miro-style alignment snapping to other elements' centers/edges.
@@ -2017,6 +2055,16 @@ impl E6App {
                     }
                 }
                 // One release = one commit = one undo step, even if nothing moved.
+                self.doc.commit();
+                self.dirty = true;
+            } else if self.resize.take().is_some() {
+                // Resize drop: re-evaluate frame membership, same commit semantics
+                // as the move (one release = one undo step).
+                for id in self.selection.iter() {
+                    if let Err(err) = self.doc.reattach_to_frame(id) {
+                        log::error!("frame reattach failed for {id:?}: {err}");
+                    }
+                }
                 self.doc.commit();
                 self.dirty = true;
             }
@@ -2353,6 +2401,25 @@ impl E6App {
             && let Some(pos) = ui.input(|i| i.pointer.hover_pos())
         {
             let world = canvas_pos_in(rect, pos, pixels_per_point);
+            // Resize-handle hover wins: show the diagonal resize cursor.
+            if self.selection.len() == 1
+                && let Some(selected_id) = self.selection.iter().next()
+                && let Some(element) = self.doc.elements().iter().find(|e| e.id == selected_id)
+                && let Some(handle) = e6_editor::resize::handle_at(
+                    element.bounds,
+                    world,
+                    10.0 / self.camera.zoom.max(0.01),
+                )
+            {
+                let cursor = match handle {
+                    e6_editor::resize::ResizeHandle::NorthWest
+                    | e6_editor::resize::ResizeHandle::SouthEast => egui::CursorIcon::ResizeNwSe,
+                    e6_editor::resize::ResizeHandle::NorthEast
+                    | e6_editor::resize::ResizeHandle::SouthWest => egui::CursorIcon::ResizeNeSw,
+                };
+                ui.ctx().set_cursor_icon(cursor);
+                return;
+            }
             if let Some(element) = self.topmost_at(world)
                 && !self.selection.contains(element.id)
             {

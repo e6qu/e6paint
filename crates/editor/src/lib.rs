@@ -4,6 +4,7 @@
 //! implemented yet.
 
 pub mod align;
+pub mod resize;
 
 use std::collections::BTreeSet;
 

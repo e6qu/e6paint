@@ -159,6 +159,29 @@ test("share-link peers join, edits sync, and the room persists", async ({
   // itself is unit-tested (collab::pong_timed_out); the reconnect machinery
   // (backoff + full-history resend) runs against the live relay in practice.
 
+  // Resize: place a rect, select it, drag its SE corner - the set_geometry
+  // batches must reach the relay.
+  await page.keyboard.press("4");
+  await page.mouse.move(box.x + 200, box.y + 320);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 360, box.y + 440, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(800);
+  await page.mouse.click(box.x + 280, box.y + 380); // select the rect
+  await page.waitForTimeout(500);
+  const batchesBeforeResize = relayLogCount("batch from");
+  // SE corner of the placed rect (world == canvas-local at zoom 1):
+  await page.mouse.move(box.x + 360, box.y + 440);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 430, box.y + 500, { steps: 8 });
+  await page.mouse.up();
+  await expect
+    .poll(() => relayLogCount("batch from") > batchesBeforeResize, {
+      timeout: 30_000,
+      intervals: [500, 1_000, 2_000],
+    })
+    .toBe(true);
+
   // A view-only token joins fine, but its edits never reach the room.
   const c = await context.newPage();
   const consoleC = collector(c);
