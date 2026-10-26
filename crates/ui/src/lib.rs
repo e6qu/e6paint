@@ -337,10 +337,17 @@ pub fn draw_right_drawer(
             if let Some(current) = sticky_color {
                 panel.heading("Sticky color");
                 panel.horizontal(|row| {
-                    for color in STICKY_COLORS {
-                        let selected = current == color;
+                    for (swatch_index, color) in STICKY_COLORS.iter().enumerate() {
+                        let selected = current == *color;
                         let (rect, response) =
                             row.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::click());
+                        response.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::Role::Button,
+                                true,
+                                format!("Sticky color {}", swatch_index + 1),
+                            )
+                        );
                         let rgb = color & 0x00FF_FFFF;
                         row.painter().rect_filled(
                             rect,
@@ -363,7 +370,7 @@ pub fn draw_right_drawer(
                             );
                         }
                         if response.clicked() {
-                            panel_action = Some(PanelAction::SetStickyColor(color));
+                            panel_action = Some(PanelAction::SetStickyColor(*color));
                         }
                     }
                 });
