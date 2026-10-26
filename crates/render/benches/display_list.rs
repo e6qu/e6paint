@@ -20,8 +20,14 @@ fn bench_display_list(c: &mut Criterion) {
         bench.iter_batched(
             Scene::new,
             |mut scene| {
-                let stats =
-                    build_display_list(&mut scene, &camera, viewport, black_box(&elements), false);
+                let stats = build_display_list(
+                    &mut scene,
+                    &camera,
+                    viewport,
+                    black_box(&elements),
+                    false,
+                    true,
+                );
                 black_box(stats)
             },
             criterion::BatchSize::SmallInput,

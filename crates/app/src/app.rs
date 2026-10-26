@@ -75,7 +75,6 @@ struct CollabSession {
     /// A ping without a pong inside the timeout means the transport is dead.
     last_ping_sent: Option<Instant>,
     last_pong_at: Option<Instant>,
-    /// Alignment guides from the current drag (Miro pink lines), world coords.
     remote_cursors: Vec<RemoteCursor>,
 }
 
@@ -228,6 +227,8 @@ pub struct E6App {
     last_canvas_rect: Option<egui::Rect>,
     /// Alignment guides from the current drag (Miro pink lines), world coords.
     alignment_guides: Vec<AlignmentGuide>,
+    /// Dot grid on/off (the canvas dots are a visual aid, not content).
+    show_grid: bool,
     /// A committed gesture is not yet autosaved.
     dirty: bool,
     /// mol code panel state (source text + last expansion errors).
@@ -329,6 +330,7 @@ impl E6App {
             last_viewport: Size::new(1.0, 1.0),
             last_canvas_rect: None,
             alignment_guides: Vec::new(),
+            show_grid: true,
             dirty: false,
             code_panel: e6_ui::CodePanelState::default(),
             mol_applied: None,
@@ -817,6 +819,7 @@ impl E6App {
                 }
                 self.dirty = true;
             }
+            HudCommand::ToggleGrid => self.show_grid = !self.show_grid,
             HudCommand::Align(mode) => self.apply_align(mode),
             HudCommand::Rotate(delta) => self.rotate_selection(delta),
             HudCommand::ExportJson => self.export_json(),
@@ -2387,6 +2390,7 @@ impl E6App {
             viewport,
             &elements,
             self.doc.sketch(),
+            self.show_grid,
         );
         self.hud.zoom = self.camera.zoom;
         self.hud.visible_elements = stats.visible;
@@ -2916,6 +2920,8 @@ impl eframe::App for E6App {
                 .is_some_and(|session| session.room.read_token.is_some()),
             #[cfg(not(target_arch = "wasm32"))]
             can_share_view: false,
+            can_present: !self.doc.frames().is_empty(),
+            show_grid: self.show_grid,
         };
         let command = draw_top_bar(ui, &self.hud, &availability);
         self.run_hud_command(command);

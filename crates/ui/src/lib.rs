@@ -130,12 +130,17 @@ pub struct HudAvailability {
     /// True only when this client created the room (owns the read token) and can
     /// therefore hand out view-only links.
     pub can_share_view: bool,
+    /// Present needs at least one frame on the board.
+    pub can_present: bool,
+    /// Dot grid visible on the canvas.
+    pub show_grid: bool,
 }
 
 /// A command the user pressed in the action bar.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HudCommand {
     None,
+    ToggleGrid,
     Undo,
     Redo,
     Reset,
@@ -463,8 +468,20 @@ pub fn draw_top_bar(
                 if bar.button(sketch_label).clicked() {
                     command = HudCommand::ToggleSketch;
                 }
-                if bar.button("Present").clicked() {
+                if bar
+                    .add_enabled(availability.can_present, egui::Button::new("Present"))
+                    .on_disabled_hover_text("Draw a frame first — Present walks the frames")
+                    .clicked()
+                {
                     command = HudCommand::Present;
+                }
+                let grid_label = if availability.show_grid {
+                    "Grid ✓"
+                } else {
+                    "Grid"
+                };
+                if bar.button(grid_label).clicked() {
+                    command = HudCommand::ToggleGrid;
                 }
                 if bar.button("Reset").clicked() {
                     command = HudCommand::Reset;

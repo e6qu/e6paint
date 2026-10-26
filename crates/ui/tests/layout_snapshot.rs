@@ -21,6 +21,8 @@ fn composition(ui: &mut egui::Ui, state: &mut (HudState, DrawerTab)) {
         any_selected_locked: false,
         sketch: false,
         can_share_view: true,
+        can_present: true,
+        show_grid: true,
     };
     let command = draw_top_bar(ui, hud, &availability);
     let _ = command;

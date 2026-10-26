@@ -27,6 +27,8 @@ fn availability(can_undo: bool) -> HudAvailability {
         any_selected_locked: false,
         sketch: false,
         can_share_view: true,
+        can_present: true,
+        show_grid: true,
     }
 }
 

@@ -71,8 +71,8 @@ fn draw_dot_grid(scene: &mut Scene, camera: &Camera, visible_region: &Aabb) {
         spacing *= 2.0;
     }
     // Screen-constant dot size.
-    let radius = (1.3 / camera.zoom).max(0.05);
-    let brush = brush_for(0xFFC9_C9D4);
+    let radius = (0.9 / camera.zoom).max(0.03);
+    let brush = brush_for(0xFFD4_D4DC);
 
     let start_x = (visible_region.min.x / spacing).floor() * spacing;
     let start_y = (visible_region.min.y / spacing).floor() * spacing;
@@ -105,9 +105,12 @@ pub fn build_display_list(
     viewport: Size,
     elements: &[Element],
     sketch: bool,
+    show_grid: bool,
 ) -> DisplayStats {
     let visible_region = camera.viewport_aabb(viewport);
-    draw_dot_grid(scene, camera, &visible_region);
+    if show_grid {
+        draw_dot_grid(scene, camera, &visible_region);
+    }
     let mut stats = DisplayStats {
         total: elements.len(),
         visible: 0,
@@ -776,7 +779,7 @@ mod tests {
         ];
 
         let mut scene = Scene::new();
-        let stats = build_display_list(&mut scene, &camera, viewport, &elements, false);
+        let stats = build_display_list(&mut scene, &camera, viewport, &elements, false, true);
 
         assert_eq!(stats.total, 3);
         assert_eq!(stats.visible, 2);
@@ -794,6 +797,7 @@ mod tests {
             Size::new(100.0, 100.0),
             &elements,
             false,
+            true,
         );
         camera.zoom_at(Point::ZERO, 0.05);
         let zoomed_out = build_display_list(
@@ -802,6 +806,7 @@ mod tests {
             Size::new(100.0, 100.0),
             &elements,
             false,
+            true,
         );
 
         assert_eq!(zoomed_in.visible, 0);
@@ -831,6 +836,7 @@ mod tests {
             Size::new(400.0, 400.0),
             &[stroke, connector, sticky],
             false,
+            true,
         );
         assert_eq!(stats.visible, 3);
         Ok(())
@@ -865,6 +871,7 @@ mod tests {
             Size::new(400.0, 400.0),
             &elements,
             true,
+            true,
         );
         assert_eq!(stats.visible, 1);
     }
@@ -887,6 +894,7 @@ mod tests {
             Size::new(400.0, 400.0),
             &[image],
             false,
+            true,
         );
         assert_eq!(stats.visible, 1);
         Ok(())
@@ -903,6 +911,7 @@ mod tests {
             Size::new(400.0, 400.0),
             &[image],
             false,
+            true,
         );
         assert_eq!(stats.visible, 1, "counted, but drawing early-returns");
     }
@@ -919,6 +928,7 @@ mod tests {
             Size::new(100.0, 100.0),
             &[connector],
             false,
+            true,
         );
         assert_eq!(stats.visible, 1, "counted, but drawing early-returns");
         Ok(())
