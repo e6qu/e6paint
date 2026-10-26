@@ -951,6 +951,15 @@ impl E6App {
     fn handle_panel_action(&mut self, action: e6_ui::PanelAction, elements: &[Element]) {
         match action {
             e6_ui::PanelAction::None => {}
+            e6_ui::PanelAction::SetStickyColor(color) => {
+                for id in self.selection.iter() {
+                    if let Err(err) = self.doc.set_color(id, color) {
+                        log::error!("sticky recolor failed: {err}");
+                    }
+                }
+                self.doc.commit();
+                self.dirty = true;
+            }
             e6_ui::PanelAction::Select(id) => {
                 self.selection.set([id]);
                 self.tool = Tool::Select;
@@ -1845,6 +1854,16 @@ impl E6App {
                 .iter()
                 .all(|e| matches!(e.kind, ElementKind::Rect | ElementKind::Ellipse))
             && elements.iter().all(|e| e.text.is_empty())
+    }
+
+    /// The fill color of the single selected sticky, for the drawer palette.
+    fn selected_sticky_color(&self) -> Option<u32> {
+        if self.selection.len() != 1 {
+            return None;
+        }
+        let id = self.selection.iter().next()?;
+        let element = self.doc.elements().into_iter().find(|e| e.id == id)?;
+        (element.kind == ElementKind::Sticky).then_some(element.color)
     }
 
     /// Union bounds of the selected elements.
@@ -2931,6 +2950,7 @@ impl eframe::App for E6App {
         self.handle_shortcuts(ui.ctx());
 
         // The right drawer consumes canvas space, so it draws before the canvas.
+        let sticky_color = self.selected_sticky_color();
         let pen_settings = (self.tool == Tool::Pen).then_some(&mut self.pen);
         let (drawer_tab, panel_action, code_action) = e6_ui::draw_right_drawer(
             ui,
@@ -2939,6 +2959,7 @@ impl eframe::App for E6App {
             &self.selection,
             &mut self.code_panel,
             pen_settings,
+            sticky_color,
         );
         self.drawer_tab = drawer_tab;
         if let Some(action) = panel_action {

@@ -191,6 +191,7 @@ fn drawer_tabs_switch_content_and_dispatch_library_action() {
                 &selection,
                 &mut code_panel.borrow_mut(),
                 None,
+                None,
             );
             *state = new_tab;
             // Multi-pass: keep the action instead of letting an idle pass clear it.

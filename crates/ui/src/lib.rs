@@ -12,6 +12,8 @@ pub mod icons;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PanelAction {
     None,
+    /// Recolor the selected sticky with the given palette color.
+    SetStickyColor(u32),
     Select(ElementId),
     ToggleHidden(ElementId),
     Insert(LibraryEntry),
@@ -270,6 +272,15 @@ impl Default for PenSettings {
 }
 
 const PEN_WIDTHS: [(&str, f32); 3] = [("Thin", 1.5), ("Normal", 3.0), ("Thick", 6.0)];
+/// Miro-style sticky palette.
+const STICKY_COLORS: [u32; 6] = [
+    0xFFF7_E97B, // yellow (default)
+    0xFFFF_B3BA, // pink
+    0xFFB3_DEDD, // mint
+    0xFFB3_C7FF, // periwinkle
+    0xFFFF_D99B, // peach
+    0xFFD9_CCFF, // lavender
+];
 const PEN_COLORS: [u32; 6] = [
     0xFF1A_1A2E, // ink (dark)
     0xFFD6_4E2C, // orange-red
@@ -296,6 +307,7 @@ pub fn draw_right_drawer(
     selection: &e6_editor::Selection,
     code_panel: &mut CodePanelState,
     pen: Option<&mut PenSettings>,
+    sticky_color: Option<u32>,
 ) -> (DrawerTab, Option<PanelAction>, CodeAction) {
     let mut tab = tab;
     let mut panel_action = None;
@@ -321,6 +333,43 @@ pub fn draw_right_drawer(
                 }
             });
             panel.add_space(6.0);
+            // Sticky palette: shown while a single sticky is selected.
+            if let Some(current) = sticky_color {
+                panel.heading("Sticky color");
+                panel.horizontal(|row| {
+                    for color in STICKY_COLORS {
+                        let selected = current == color;
+                        let (rect, response) =
+                            row.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::click());
+                        let rgb = color & 0x00FF_FFFF;
+                        row.painter().rect_filled(
+                            rect,
+                            4.0,
+                            egui::Color32::from_rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8),
+                        );
+                        if selected {
+                            row.painter().rect_stroke(
+                                rect,
+                                4.0,
+                                egui::Stroke::new(2.0, egui::Color32::from_rgb(26, 26, 46)),
+                                egui::StrokeKind::Middle,
+                            );
+                        } else if response.hovered() {
+                            row.painter().rect_stroke(
+                                rect,
+                                4.0,
+                                egui::Stroke::new(1.0, egui::Color32::from_rgb(120, 120, 140)),
+                                egui::StrokeKind::Middle,
+                            );
+                        }
+                        if response.clicked() {
+                            panel_action = Some(PanelAction::SetStickyColor(color));
+                        }
+                    }
+                });
+                panel.separator();
+                panel.add_space(4.0);
+            }
             // Contextual Pen options, above the tabs while the Pen tool is active.
             if let Some(pen) = pen {
                 panel.heading("Pen");

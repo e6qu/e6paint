@@ -41,6 +41,7 @@ fn composition(ui: &mut egui::Ui, state: &mut (HudState, DrawerTab)) {
         &selection,
         &mut code_panel,
         None,
+        None,
     );
     *drawer_tab = new_tab;
 

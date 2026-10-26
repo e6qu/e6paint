@@ -511,6 +511,22 @@ impl BoardDoc {
         Ok(())
     }
 
+    /// Overwrite an element's fill color. No commit.
+    pub fn set_color(&self, id: ElementId, color: u32) -> Result<(), DocError> {
+        let key = id_key(id);
+        let element = self.element_container(&key)?;
+        element.insert("color", i64::from(color))?;
+        self.state
+            .lock()
+            .map(|mut state| {
+                if let Some(slot) = state.elements.iter_mut().find(|e| e.id == id) {
+                    slot.color = color;
+                }
+            })
+            .map_err(|_| DocError::Corrupt("state mutex poisoned".into()))?;
+        Ok(())
+    }
+
     /// Move an element by a world-space delta: bounds origin *and* any absolute points
     /// (strokes, connectors) translate together. No commit.
     pub fn translate(&self, id: ElementId, dx: f32, dy: f32) -> Result<(), DocError> {

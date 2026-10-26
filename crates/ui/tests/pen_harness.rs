@@ -18,6 +18,7 @@ fn pen_options_dispatch_width_and_color() {
                 &e6_editor::Selection::new(),
                 &mut CodePanelState::default(),
                 Some(&mut pen),
+                None,
             );
             *state = pen;
         },
@@ -44,6 +45,7 @@ fn pen_options_absent_without_pen_tool() {
                 &[],
                 &e6_editor::Selection::new(),
                 &mut CodePanelState::default(),
+                None,
                 None,
             );
             *state = true;
