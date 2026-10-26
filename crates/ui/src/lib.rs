@@ -311,6 +311,9 @@ pub fn draw_right_drawer(
 ) -> (DrawerTab, Option<PanelAction>, CodeAction) {
     let mut tab = tab;
     let mut panel_action = None;
+    // The sticky palette sits beside the tab content: its action travels on its
+    // own channel so the tab match below cannot clobber it.
+    let mut palette_action: Option<PanelAction> = None;
     let mut code_action = CodeAction::None;
     egui::Panel::right("e6_drawer")
         .exact_size(248.0)
@@ -347,7 +350,7 @@ pub fn draw_right_drawer(
                                 true,
                                 format!("Sticky color {}", swatch_index + 1),
                             )
-                        );
+                        });
                         let rgb = color & 0x00FF_FFFF;
                         row.painter().rect_filled(
                             rect,
@@ -370,7 +373,8 @@ pub fn draw_right_drawer(
                             );
                         }
                         if response.clicked() {
-                            panel_action = Some(PanelAction::SetStickyColor(*color));
+                            eprintln!("DEBUG sticky swatch {} clicked", swatch_index + 1);
+                            palette_action = Some(PanelAction::SetStickyColor(*color));
                         }
                     }
                 });
@@ -442,6 +446,9 @@ pub fn draw_right_drawer(
                 }
             }
         });
+    if panel_action.is_none() {
+        panel_action = palette_action;
+    }
     (tab, panel_action, code_action)
 }
 

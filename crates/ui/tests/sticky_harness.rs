@@ -21,6 +21,7 @@ fn sticky_palette_dispatches_recolor() {
                 None,
                 current,
             );
+            eprintln!("DEBUG closure panel_action: {:?}", panel_action);
             if let Some(e6_ui::PanelAction::SetStickyColor(color)) = panel_action {
                 *picked.borrow_mut() = Some(e6_ui::PanelAction::SetStickyColor(color));
             }
