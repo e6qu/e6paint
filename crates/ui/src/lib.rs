@@ -461,7 +461,7 @@ pub fn draw_top_bar(
                 });
 
                 let sketch_label = if availability.sketch {
-                    "Sketch ✓"
+                    "Sketch: on"
                 } else {
                     "Sketch"
                 };
@@ -476,7 +476,7 @@ pub fn draw_top_bar(
                     command = HudCommand::Present;
                 }
                 let grid_label = if availability.show_grid {
-                    "Grid ✓"
+                    "Grid: on"
                 } else {
                     "Grid"
                 };
