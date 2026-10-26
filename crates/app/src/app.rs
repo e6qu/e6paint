@@ -233,6 +233,8 @@ pub struct E6App {
     dirty: bool,
     /// mol code panel state (source text + last expansion errors).
     code_panel: e6_ui::CodePanelState,
+    /// Stroke settings for the Pen tool.
+    pen: e6_ui::PenSettings,
     /// Source text of the last mol expansion (drives re-apply).
     mol_applied: Option<String>,
     /// Live collaboration session state (web only).
@@ -333,6 +335,7 @@ impl E6App {
             show_grid: true,
             dirty: false,
             code_panel: e6_ui::CodePanelState::default(),
+            pen: e6_ui::PenSettings::default(),
             mol_applied: None,
             #[cfg(target_arch = "wasm32")]
             collab: None,
@@ -2148,8 +2151,8 @@ impl E6App {
             && points.len() >= 2
             && let Some(bounds) = Aabb::from_points(&points)
         {
-            let spec = ElementSpec::simple(ElementKind::Stroke, bounds, INK)
-                .outlined(INK, 2.5)
+            let spec = ElementSpec::simple(ElementKind::Stroke, bounds, self.pen.color)
+                .outlined(self.pen.color, self.pen.width)
                 .with_points(points);
             match self.doc.insert_element(&spec) {
                 Ok(_) => {
@@ -2928,12 +2931,14 @@ impl eframe::App for E6App {
         self.handle_shortcuts(ui.ctx());
 
         // The right drawer consumes canvas space, so it draws before the canvas.
+        let pen_settings = (self.tool == Tool::Pen).then_some(&mut self.pen);
         let (drawer_tab, panel_action, code_action) = e6_ui::draw_right_drawer(
             ui,
             self.drawer_tab,
             &elements,
             &self.selection,
             &mut self.code_panel,
+            pen_settings,
         );
         self.drawer_tab = drawer_tab;
         if let Some(action) = panel_action {

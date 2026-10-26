@@ -34,8 +34,14 @@ fn composition(ui: &mut egui::Ui, state: &mut (HudState, DrawerTab)) {
         text: "flow \"Demo\" {\n  a -> b\n}".to_owned(),
         errors: Vec::new(),
     };
-    let (new_tab, _panel_action, _code_action) =
-        draw_right_drawer(ui, *drawer_tab, &elements, &selection, &mut code_panel);
+    let (new_tab, _panel_action, _code_action) = draw_right_drawer(
+        ui,
+        *drawer_tab,
+        &elements,
+        &selection,
+        &mut code_panel,
+        None,
+    );
     *drawer_tab = new_tab;
 
     // Canvas stand-in: a bordered empty area where the board renders.

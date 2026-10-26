@@ -253,6 +253,32 @@ pub fn draw_tool_bar(ui: &mut egui::Ui, active: Tool) -> Option<Tool> {
 
 /// Draws the bottom status HUD with the action bar; returns the pressed command.
 /// Call once per pass onto the root UI, before the canvas.
+/// Stroke settings for the Pen tool, owned by the app.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PenSettings {
+    pub width: f32,
+    pub color: u32,
+}
+
+impl Default for PenSettings {
+    fn default() -> Self {
+        Self {
+            width: 2.5,
+            color: 0xFF1A_1A2E,
+        }
+    }
+}
+
+const PEN_WIDTHS: [(&str, f32); 3] = [("Thin", 1.5), ("Normal", 3.0), ("Thick", 6.0)];
+const PEN_COLORS: [u32; 6] = [
+    0xFF1A_1A2E, // ink (dark)
+    0xFFD6_4E2C, // orange-red
+    0xFF2E_7D4E, // green
+    0xFF2E_5E8E, // blue
+    0xFF8E_44AD, // purple
+    0xFFB8_862D, // ochre
+];
+
 /// Which tab is active in the right drawer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DrawerTab {
@@ -269,6 +295,7 @@ pub fn draw_right_drawer(
     elements: &[Element],
     selection: &e6_editor::Selection,
     code_panel: &mut CodePanelState,
+    pen: Option<&mut PenSettings>,
 ) -> (DrawerTab, Option<PanelAction>, CodeAction) {
     let mut tab = tab;
     let mut panel_action = None;
@@ -294,6 +321,59 @@ pub fn draw_right_drawer(
                 }
             });
             panel.add_space(6.0);
+            // Contextual Pen options, above the tabs while the Pen tool is active.
+            if let Some(pen) = pen {
+                panel.heading("Pen");
+                panel.horizontal(|row| {
+                    for (label, width) in PEN_WIDTHS {
+                        let selected = (pen.width - width).abs() < 0.01;
+                        if row.selectable_label(selected, label).clicked() {
+                            pen.width = width;
+                        }
+                    }
+                });
+                panel.add_space(4.0);
+                panel.horizontal(|row| {
+                    for (swatch_index, color) in PEN_COLORS.iter().enumerate() {
+                        let selected = pen.color == *color;
+                        let (rect, response) =
+                            row.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::click());
+                        response.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::Role::Button,
+                                true,
+                                format!("Pen color {}", swatch_index + 1),
+                            )
+                        });
+                        let rgb = color & 0x00FF_FFFF;
+                        row.painter().rect_filled(
+                            rect,
+                            4.0,
+                            egui::Color32::from_rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8),
+                        );
+                        if selected {
+                            row.painter().rect_stroke(
+                                rect,
+                                4.0,
+                                egui::Stroke::new(2.0, egui::Color32::from_rgb(26, 26, 46)),
+                                egui::StrokeKind::Middle,
+                            );
+                        } else if response.hovered() {
+                            row.painter().rect_stroke(
+                                rect,
+                                4.0,
+                                egui::Stroke::new(1.0, egui::Color32::from_rgb(120, 120, 140)),
+                                egui::StrokeKind::Middle,
+                            );
+                        }
+                        if response.clicked() {
+                            pen.color = *color;
+                        }
+                    }
+                });
+                panel.separator();
+                panel.add_space(4.0);
+            }
             match tab {
                 DrawerTab::Library => {
                     panel_action = draw_library_content(panel);
