@@ -110,6 +110,58 @@ impl Element {
         }
     }
 
+    /// Wrap a rotation to [0, 2pi), snapping near-zero values to exactly 0 so
+    /// full-turn round trips stay byte-identical to an unrotated element.
+    pub fn normalize_rotation(rotation: f32) -> f32 {
+        let tau = core::f32::consts::TAU;
+        let wrapped = rotation.rem_euclid(tau);
+        if wrapped < 0.01 || tau - wrapped < 0.01 {
+            0.0
+        } else {
+            wrapped
+        }
+    }
+
+    /// Map a world point into this element's local (unrotated) frame: the inverse
+    /// of the rotation about the bounds center.
+    pub fn to_local(&self, world: Point) -> Point {
+        if self.rotation == 0.0 {
+            return world;
+        }
+        let center = self.bounds.center();
+        let (sin, cos) = f64::from(-self.rotation).sin_cos();
+        let dx = f64::from(world.x) - f64::from(center.x);
+        let dy = f64::from(world.y) - f64::from(center.y);
+        Point::new(
+            ((dx * cos - dy * sin) + f64::from(center.x)) as f32,
+            ((dx * sin + dy * cos) + f64::from(center.y)) as f32,
+        )
+    }
+
+    /// The four bounds corners rotated about the bounds center (the outline a
+    /// rotated element paints).
+    pub fn rotated_corners(&self) -> [Point; 4] {
+        if self.rotation == 0.0 {
+            return [
+                self.bounds.min,
+                Point::new(self.bounds.max.x, self.bounds.min.y),
+                self.bounds.max,
+                Point::new(self.bounds.min.x, self.bounds.max.y),
+            ];
+        }
+        let center = self.bounds.center();
+        let (sin, cos) = f64::from(self.rotation).sin_cos();
+        let (hw, hh) = (
+            f64::from(self.bounds.size().width) / 2.0,
+            f64::from(self.bounds.size().height) / 2.0,
+        );
+        let (cx, cy) = (f64::from(center.x), f64::from(center.y));
+        [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)].map(|(dx, dy)| {
+            let (rx, ry) = (dx * cos - dy * sin, dx * sin + dy * cos);
+            Point::new((cx + rx) as f32, (cy + ry) as f32)
+        })
+    }
+
     /// Builder: outline style (shapes drawn stroked, not filled).
     pub fn outlined(mut self, stroke_color: u32, stroke_width: f32) -> Self {
         self.stroke_color = stroke_color;
@@ -135,6 +187,82 @@ impl Element {
 mod tests {
     use super::*;
     use crate::geom::Size;
+
+    #[test]
+    fn rotation_normalizes_full_turns_to_zero() {
+        use core::f32::consts::{FRAC_PI_2, TAU};
+        assert_eq!(Element::normalize_rotation(0.0), 0.0);
+        assert_eq!(Element::normalize_rotation(TAU), 0.0);
+        assert_eq!(Element::normalize_rotation(-TAU), 0.0);
+        assert_eq!(
+            Element::normalize_rotation(24.0 * (core::f32::consts::PI / 12.0)),
+            0.0
+        );
+        let quarter = Element::normalize_rotation(FRAC_PI_2);
+        assert!((quarter - FRAC_PI_2).abs() < 1e-6);
+        let three_quarter = Element::normalize_rotation(-FRAC_PI_2);
+        assert!((three_quarter - 3.0 * FRAC_PI_2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn to_local_inverts_the_rotation_about_the_center() {
+        use core::f32::consts::FRAC_PI_2;
+        let bounds = Aabb::from_min_size(Point::new(100.0, 200.0), Size::new(80.0, 40.0));
+        let element = Element {
+            rotation: FRAC_PI_2,
+            ..Element::new(
+                ElementId::from_raw(1),
+                ElementKind::Rect,
+                bounds,
+                0xFF00_00FF,
+            )
+        };
+        let center = bounds.center();
+        // A point on the painted top edge maps back onto the local top edge.
+        let painted_top = Point::new(center.x - 10.0, center.y - 40.0);
+        let local = element.to_local(painted_top);
+        assert!(
+            bounds.contains(local),
+            "painted point {painted_top:?} maps into local bounds, got {local:?}"
+        );
+        // The center is its own image.
+        let local_center = element.to_local(center);
+        assert!((local_center.x - center.x).abs() < 1e-4);
+        assert!((local_center.y - center.y).abs() < 1e-4);
+    }
+
+    #[test]
+    fn rotated_corners_swap_extents_for_a_quarter_turn() {
+        use core::f32::consts::FRAC_PI_2;
+        let bounds = Aabb::from_min_size(Point::new(0.0, 0.0), Size::new(100.0, 50.0));
+        let element = Element {
+            rotation: FRAC_PI_2,
+            ..Element::new(
+                ElementId::from_raw(1),
+                ElementKind::Rect,
+                bounds,
+                0xFF00_00FF,
+            )
+        };
+        let corners = element.rotated_corners();
+        let center = bounds.center();
+        // Quarter turn: the 100x50 shape paints 50 wide by 100 tall, so corner
+        // offsets from the center are 25 across and 50 up/down.
+        for corner in corners {
+            assert!((corner.x - center.x).abs() - 25.0 < 1e-4);
+            assert!((corner.y - center.y).abs() - 50.0 < 1e-4);
+        }
+        // Unrotated elements return their axis-aligned corners unchanged.
+        let flat = Element::new(
+            ElementId::from_raw(2),
+            ElementKind::Rect,
+            bounds,
+            0xFF00_00FF,
+        );
+        let corners = flat.rotated_corners();
+        assert_eq!(corners[0], bounds.min);
+        assert_eq!(corners[2], bounds.max);
+    }
 
     #[test]
     fn defaults_are_filled_and_payload_free() {

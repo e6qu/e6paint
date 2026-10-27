@@ -105,7 +105,7 @@ impl ElementSpec {
 
     /// Builder: rotation in radians (counter-clockwise, about the bounds center).
     pub fn with_rotation(mut self, rotation: f32) -> Self {
-        self.rotation = rotation;
+        self.rotation = e6_scene::element::Element::normalize_rotation(rotation);
         self
     }
 }
@@ -464,6 +464,7 @@ impl BoardDoc {
     /// Overwrite an element's bounds. No commit — group per gesture.
     /// Set an element's rotation (radians, counter-clockwise about its center).
     pub fn set_rotation(&self, id: ElementId, rotation: f32) -> Result<(), DocError> {
+        let rotation = Element::normalize_rotation(rotation);
         let element = self.element_container(&id_key(id))?;
         element.insert("rot", f64::from(rotation))?;
         self.state
@@ -1072,7 +1073,7 @@ fn build_element(key: &str, slot: loro::ValueOrContainer) -> Result<Element, Doc
         font_size,
         group,
         frame,
-        rotation,
+        rotation: Element::normalize_rotation(rotation),
         locked,
         hidden,
         provenance,

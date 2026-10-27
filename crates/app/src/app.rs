@@ -2001,6 +2001,7 @@ impl E6App {
                 let grab_world = 10.0 / self.camera.zoom.max(0.01);
                 if let Some(selected_id) = self.selection.iter().next()
                     && let Some(element) = self.doc.elements().iter().find(|e| e.id == selected_id)
+                    && element.rotation == 0.0
                     && let Some(handle) =
                         e6_editor::resize::handle_at(element.bounds, press_world, grab_world)
                 {
@@ -2324,7 +2325,7 @@ impl E6App {
             .elements()
             .into_iter()
             .rev()
-            .find(|e| !e.locked && !e.hidden && e.bounds.contains(world))
+            .find(|e| !e.locked && !e.hidden && e.bounds.contains(e.to_local(world)))
     }
 
     /// The inline text editor for text/sticky elements, anchored over the canvas.
@@ -2472,6 +2473,7 @@ impl E6App {
             if self.selection.len() == 1
                 && let Some(selected_id) = self.selection.iter().next()
                 && let Some(element) = self.doc.elements().iter().find(|e| e.id == selected_id)
+                && element.rotation == 0.0
                 && let Some(handle) = e6_editor::resize::handle_at(
                     element.bounds,
                     world,
@@ -2494,21 +2496,42 @@ impl E6App {
             if let Some(element) = self.topmost_at(world)
                 && !self.selection.contains(element.id)
             {
-                let min = self.camera.world_to_screen(element.bounds.min);
-                let max = self.camera.world_to_screen(element.bounds.max);
-                let hover_rect = egui::Rect::from_two_pos(
-                    egui::Pos2::new(min.x / pixels_per_point, min.y / pixels_per_point),
-                    egui::Pos2::new(max.x / pixels_per_point, max.y / pixels_per_point),
-                );
-                ui.painter().rect_stroke(
-                    hover_rect,
-                    0.0,
-                    egui::Stroke::new(
-                        1.5 * pixels_per_point,
-                        egui::Color32::from_rgb(90, 145, 255),
-                    ),
-                    egui::StrokeKind::Middle,
-                );
+                if element.rotation == 0.0 {
+                    let min = self.camera.world_to_screen(element.bounds.min);
+                    let max = self.camera.world_to_screen(element.bounds.max);
+                    let hover_rect = egui::Rect::from_two_pos(
+                        egui::Pos2::new(min.x / pixels_per_point, min.y / pixels_per_point),
+                        egui::Pos2::new(max.x / pixels_per_point, max.y / pixels_per_point),
+                    );
+                    ui.painter().rect_stroke(
+                        hover_rect,
+                        0.0,
+                        egui::Stroke::new(
+                            1.5 * pixels_per_point,
+                            egui::Color32::from_rgb(90, 145, 255),
+                        ),
+                        egui::StrokeKind::Middle,
+                    );
+                } else {
+                    let corners: Vec<egui::Pos2> = element
+                        .rotated_corners()
+                        .iter()
+                        .map(|world| {
+                            let screen = self.camera.world_to_screen(*world);
+                            egui::Pos2::new(
+                                screen.x / pixels_per_point,
+                                screen.y / pixels_per_point,
+                            )
+                        })
+                        .collect();
+                    ui.painter().add(egui::Shape::closed_line(
+                        corners,
+                        egui::Stroke::new(
+                            1.5 * pixels_per_point,
+                            egui::Color32::from_rgb(90, 145, 255),
+                        ),
+                    ));
+                }
             }
         }
 
@@ -2563,14 +2586,35 @@ impl E6App {
             let Some(element) = elements.iter().find(|e| e.id == id) else {
                 continue;
             };
-            let min = self.camera.world_to_screen(element.bounds.min);
-            let max = self.camera.world_to_screen(element.bounds.max);
-            let rect = egui::Rect::from_two_pos(
-                egui::Pos2::new(min.x / pixels_per_point, min.y / pixels_per_point),
-                egui::Pos2::new(max.x / pixels_per_point, max.y / pixels_per_point),
-            );
-            painter.rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Middle);
-            if count == 1 && element.rotation.abs() < 0.01 {
+            let to_screen = |world: Point| {
+                let screen = self.camera.world_to_screen(world);
+                egui::Pos2::new(screen.x / pixels_per_point, screen.y / pixels_per_point)
+            };
+            if element.rotation == 0.0 {
+                let min = to_screen(element.bounds.min);
+                let max = to_screen(element.bounds.max);
+                let rect = egui::Rect::from_two_pos(min, max);
+                painter.rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Middle);
+            } else {
+                // The outline follows the painted geometry: corners rotated
+                // about the element center.
+                let corners: Vec<egui::Pos2> = element
+                    .rotated_corners()
+                    .iter()
+                    .map(|p| to_screen(*p))
+                    .collect();
+                painter.add(egui::Shape::closed_line(
+                    corners,
+                    egui::Stroke::new(
+                        1.5 * pixels_per_point,
+                        egui::Color32::from_rgb(13, 153, 255),
+                    ),
+                ));
+            }
+            if count == 1 && element.rotation == 0.0 {
+                let min = to_screen(element.bounds.min);
+                let max = to_screen(element.bounds.max);
+                let rect = egui::Rect::from_two_pos(min, max);
                 // Eight handles: four corners + four edge midpoints, matching
                 // editor::resize::handle_at.
                 for corner in [
