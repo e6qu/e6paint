@@ -55,7 +55,7 @@ proptest = "1"
 kittest = "0.5"
 egui_kittest = { version = "0.37", features = ["snapshot", "wgpu"] }
 web-time = "1"
-tokio-tungstenite = "0.29"
+tokio-tungstenite = "0.30"
 futures-util = "0.3"
 
 # CRDT document store (DESIGN D5): one LoroDoc per board.
