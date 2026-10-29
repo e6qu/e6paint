@@ -4,6 +4,11 @@
 //! moves that side/corner of the bounds; the opposite side stays anchored.
 //! The size is clamped to a minimum — dragging past the anchor clamps at the
 //! floor instead of flipping (Miro behavior).
+//!
+//! Rotated elements resize in their local frame: the pointer offset from the
+//! fixed anchor is un-rotated into element space, and the stored bounds are
+//! re-anchored so the painted anchor stays put while the painted handle
+//! follows the pointer.
 
 use e6_scene::{Aabb, Point};
 
@@ -104,6 +109,110 @@ pub fn resize_bounds(original: Aabb, handle: ResizeHandle, world: Point) -> Aabb
     Aabb::from_min_size(min, e6_scene::Size::new(max.x - min.x, max.y - min.y))
 }
 
+/// The local-frame point the `handle` sits on (bounds corners for corners,
+/// edge midpoints for edges).
+pub fn handle_point(handle: ResizeHandle, bounds: Aabb) -> Point {
+    let center = bounds.center();
+    match handle {
+        ResizeHandle::NorthWest => Point::new(bounds.min.x, bounds.min.y),
+        ResizeHandle::North => Point::new(center.x, bounds.min.y),
+        ResizeHandle::NorthEast => Point::new(bounds.max.x, bounds.min.y),
+        ResizeHandle::East => Point::new(bounds.max.x, center.y),
+        ResizeHandle::SouthEast => Point::new(bounds.max.x, bounds.max.y),
+        ResizeHandle::South => Point::new(center.x, bounds.max.y),
+        ResizeHandle::SouthWest => Point::new(bounds.min.x, bounds.max.y),
+        ResizeHandle::West => Point::new(bounds.min.x, center.y),
+    }
+}
+
+/// The local-frame point that stays fixed while `handle` drags: the opposite
+/// corner for corner handles, the opposite edge's midpoint for edges.
+pub fn anchor_point(handle: ResizeHandle, bounds: Aabb) -> Point {
+    handle_point(opposite(handle), bounds)
+}
+
+/// The handle diagonally / directly opposite `handle`.
+pub fn opposite(handle: ResizeHandle) -> ResizeHandle {
+    match handle {
+        ResizeHandle::NorthWest => ResizeHandle::SouthEast,
+        ResizeHandle::North => ResizeHandle::South,
+        ResizeHandle::NorthEast => ResizeHandle::SouthWest,
+        ResizeHandle::East => ResizeHandle::West,
+        ResizeHandle::SouthEast => ResizeHandle::NorthWest,
+        ResizeHandle::South => ResizeHandle::North,
+        ResizeHandle::SouthWest => ResizeHandle::NorthEast,
+        ResizeHandle::West => ResizeHandle::East,
+    }
+}
+
+/// Resize a rotated element by moving `handle` to `pointer` (world space).
+///
+/// The resize happens in the element's local frame; the returned bounds are
+/// re-anchored so the painted anchor point stays exactly at `anchor_world`
+/// and the painted handle corner follows the pointer (clamping at
+/// [`MIN_SIZE`] as in the axis-aligned path). `anchor_world` is the painted
+/// position of [`anchor_point`] for the gesture's starting bounds.
+pub fn resize_bounds_rotated(
+    original: Aabb,
+    handle: ResizeHandle,
+    rotation: f32,
+    pointer: Point,
+    anchor_world: Point,
+) -> Aabb {
+    // The pointer offset from the fixed anchor, in the element's local frame.
+    // Since the painted map is an affine image of the local bounds, the new
+    // local size is fully determined by this offset.
+    let (u, v) = e6_scene::geom::unrotate_vec(
+        pointer.x - anchor_world.x,
+        pointer.y - anchor_world.y,
+        rotation,
+    );
+    let width = original.size().width;
+    let height = original.size().height;
+    let (new_w, new_h) = match handle {
+        ResizeHandle::SouthEast => (u.max(MIN_SIZE), v.max(MIN_SIZE)),
+        ResizeHandle::NorthEast => (u.max(MIN_SIZE), (-v).max(MIN_SIZE)),
+        ResizeHandle::SouthWest => ((-u).max(MIN_SIZE), v.max(MIN_SIZE)),
+        ResizeHandle::NorthWest => ((-u).max(MIN_SIZE), (-v).max(MIN_SIZE)),
+        ResizeHandle::East => (u.max(MIN_SIZE), height),
+        ResizeHandle::West => ((-u).max(MIN_SIZE), height),
+        ResizeHandle::South => (width, v.max(MIN_SIZE)),
+        ResizeHandle::North => (width, (-v).max(MIN_SIZE)),
+    };
+    // Rebuild the bounds from the fixed anchor sides.
+    let moves_min_x = matches!(
+        handle,
+        ResizeHandle::NorthWest | ResizeHandle::SouthWest | ResizeHandle::West
+    );
+    let moves_min_y = matches!(
+        handle,
+        ResizeHandle::NorthWest | ResizeHandle::NorthEast | ResizeHandle::North
+    );
+    let min_x = if moves_min_x {
+        original.max.x - new_w
+    } else {
+        original.min.x
+    };
+    let min_y = if moves_min_y {
+        original.max.y - new_h
+    } else {
+        original.min.y
+    };
+    let next = Aabb::from_min_size(Point::new(min_x, min_y), e6_scene::Size::new(new_w, new_h));
+    // Re-anchor: translation commutes with the rotation about the center, so
+    // shifting the stored bounds shifts the painted shape identically.
+    let painted_anchor =
+        e6_scene::geom::rotate_about(anchor_point(handle, next), next.center(), rotation);
+    let delta = Point::new(
+        anchor_world.x - painted_anchor.x,
+        anchor_world.y - painted_anchor.y,
+    );
+    Aabb::from_min_size(
+        Point::new(next.min.x + delta.x, next.min.y + delta.y),
+        next.size(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,5 +290,118 @@ mod tests {
         assert_eq!(handle_at(bounds, Point::new(50.0, 50.0), 10.0), None);
         // Beyond the span: no edge handle.
         assert_eq!(handle_at(bounds, Point::new(100.0, 500.0), 10.0), None);
+    }
+
+    /// Painted position of a local point for an element with `bounds` and
+    /// `rotation` — the same affine map the renderer applies.
+    fn painted(bounds: Aabb, rotation: f32, local: Point) -> Point {
+        e6_scene::geom::rotate_about(local, bounds.center(), rotation)
+    }
+
+    fn near(a: Point, b: Point) -> bool {
+        (a.x - b.x).abs() < 1e-3 && (a.y - b.y).abs() < 1e-3
+    }
+
+    #[test]
+    fn opposite_is_involutive_and_pairwise() {
+        for handle in [
+            ResizeHandle::NorthWest,
+            ResizeHandle::North,
+            ResizeHandle::NorthEast,
+            ResizeHandle::East,
+            ResizeHandle::SouthEast,
+            ResizeHandle::South,
+            ResizeHandle::SouthWest,
+            ResizeHandle::West,
+        ] {
+            assert_eq!(opposite(opposite(handle)), handle);
+        }
+        assert_eq!(opposite(ResizeHandle::NorthWest), ResizeHandle::SouthEast);
+        assert_eq!(opposite(ResizeHandle::East), ResizeHandle::West);
+    }
+
+    #[test]
+    fn quarter_turn_corner_drag_tracks_the_pointer_and_fixes_the_anchor() {
+        use core::f32::consts::FRAC_PI_2;
+        // 100x50 element at the origin, rotated a quarter turn: it paints as a
+        // 50x100 box spanning x in [25, 75], y in [-25, 75].
+        let original = square(0.0, 0.0, 100.0);
+        let original = Aabb::from_min_size(
+            original.min,
+            e6_scene::Size::new(original.size().width, original.size().height * 0.5),
+        );
+        let rotation = FRAC_PI_2;
+        let handle = ResizeHandle::NorthEast;
+        let anchor_world = painted(original, rotation, anchor_point(handle, original));
+        assert!(near(anchor_world, Point::new(25.0, -25.0)));
+
+        // Drag the painted NE corner (75, 75) to (55, 100).
+        let pointer = Point::new(55.0, 100.0);
+        let next = resize_bounds_rotated(original, handle, rotation, pointer, anchor_world);
+
+        // The painted anchor did not move.
+        assert!(near(
+            painted(next, rotation, anchor_point(handle, next)),
+            anchor_world
+        ));
+        // The painted dragged corner landed on the pointer.
+        assert!(near(
+            painted(next, rotation, handle_point(handle, next)),
+            pointer
+        ));
+        // The local size grew to 125x30 (the drag in the element's frame).
+        assert!((next.size().width - 125.0).abs() < 1e-3);
+        assert!((next.size().height - 30.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn quarter_turn_edge_drag_tracks_the_pointer_perpendicular_to_the_edge() {
+        use core::f32::consts::FRAC_PI_2;
+        let original = Aabb::from_min_size(Point::new(0.0, 0.0), e6_scene::Size::new(100.0, 50.0));
+        let rotation = FRAC_PI_2;
+        let handle = ResizeHandle::East;
+        let anchor_world = painted(original, rotation, anchor_point(handle, original));
+        // The quarter turn paints the local East edge horizontally through the
+        // handle at (50, 75); width responds to vertical pointer motion.
+        let pointer = Point::new(50.0, 115.0);
+        let next = resize_bounds_rotated(original, handle, rotation, pointer, anchor_world);
+        assert!(near(
+            painted(next, rotation, anchor_point(handle, next)),
+            anchor_world
+        ));
+        assert!(near(
+            painted(next, rotation, handle_point(handle, next)),
+            pointer
+        ));
+        // Only the width changed; the pointer's along-edge motion is ignored.
+        assert!((next.size().width - 140.0).abs() < 1e-3);
+        assert!((next.size().height - 50.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn rotated_drag_past_the_anchor_clamps_at_min_size() {
+        use core::f32::consts::FRAC_PI_2;
+        let original = Aabb::from_min_size(Point::new(0.0, 0.0), e6_scene::Size::new(100.0, 50.0));
+        let rotation = FRAC_PI_2;
+        let handle = ResizeHandle::NorthEast;
+        let anchor_world = painted(original, rotation, anchor_point(handle, original));
+        // Pointer pulled hard past the anchor: both dimensions clamp.
+        let pointer = Point::new(30.0, 0.0);
+        let next = resize_bounds_rotated(original, handle, rotation, pointer, anchor_world);
+        assert!(next.size().width >= MIN_SIZE && next.size().height >= MIN_SIZE);
+        assert!(near(
+            painted(next, rotation, anchor_point(handle, next)),
+            anchor_world
+        ));
+    }
+
+    #[test]
+    fn rotated_and_axis_aligned_agree_at_zero_rotation() {
+        let original = square(10.0, 20.0, 100.0);
+        let handle = ResizeHandle::SouthEast;
+        let pointer = Point::new(160.0, 150.0);
+        let anchor_world = anchor_point(handle, original);
+        let rotated = resize_bounds_rotated(original, handle, 0.0, pointer, anchor_world);
+        assert_eq!(rotated, resize_bounds(original, handle, pointer));
     }
 }

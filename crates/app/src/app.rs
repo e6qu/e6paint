@@ -141,6 +141,10 @@ struct DragState {
 struct ResizeState {
     handle: e6_editor::resize::ResizeHandle,
     original: Aabb,
+    /// Element rotation (radians); zero takes the axis-aligned path.
+    rotation: f32,
+    /// Painted position of the gesture's fixed anchor point.
+    anchor_world: Point,
 }
 
 /// An in-progress marquee selection (world-space corners).
@@ -2001,15 +2005,31 @@ impl E6App {
                 let grab_world = 10.0 / self.camera.zoom.max(0.01);
                 if let Some(selected_id) = self.selection.iter().next()
                     && let Some(element) = self.doc.elements().iter().find(|e| e.id == selected_id)
-                    && element.rotation == 0.0
-                    && let Some(handle) =
-                        e6_editor::resize::handle_at(element.bounds, press_world, grab_world)
                 {
-                    self.resize = Some(ResizeState {
-                        handle,
-                        original: element.bounds,
-                    });
-                    return;
+                    // Handles live in the element's local frame; map the press
+                    // there so rotated elements hit-test against their painted
+                    // geometry.
+                    let local_press = e6_scene::geom::unrotate_about(
+                        press_world,
+                        element.bounds.center(),
+                        element.rotation,
+                    );
+                    if let Some(handle) =
+                        e6_editor::resize::handle_at(element.bounds, local_press, grab_world)
+                    {
+                        let anchor_world = e6_scene::geom::rotate_about(
+                            e6_editor::resize::anchor_point(handle, element.bounds),
+                            element.bounds.center(),
+                            element.rotation,
+                        );
+                        self.resize = Some(ResizeState {
+                            handle,
+                            original: element.bounds,
+                            rotation: element.rotation,
+                            anchor_world,
+                        });
+                        return;
+                    }
                 }
             }
             match self.topmost_at(press_world) {
@@ -2047,8 +2067,17 @@ impl E6App {
             if let Some(resize) = self.resize.as_ref()
                 && let Some(selected_id) = self.selection.iter().next()
             {
-                let bounds =
-                    e6_editor::resize::resize_bounds(resize.original, resize.handle, current);
+                let bounds = if resize.rotation == 0.0 {
+                    e6_editor::resize::resize_bounds(resize.original, resize.handle, current)
+                } else {
+                    e6_editor::resize::resize_bounds_rotated(
+                        resize.original,
+                        resize.handle,
+                        resize.rotation,
+                        current,
+                        resize.anchor_world,
+                    )
+                };
                 if let Err(err) = self.doc.set_geometry(selected_id, bounds) {
                     log::error!("resize failed: {err}");
                 }
@@ -2473,10 +2502,13 @@ impl E6App {
             if self.selection.len() == 1
                 && let Some(selected_id) = self.selection.iter().next()
                 && let Some(element) = self.doc.elements().iter().find(|e| e.id == selected_id)
-                && element.rotation == 0.0
                 && let Some(handle) = e6_editor::resize::handle_at(
                     element.bounds,
-                    world,
+                    e6_scene::geom::unrotate_about(
+                        world,
+                        element.bounds.center(),
+                        element.rotation,
+                    ),
                     10.0 / self.camera.zoom.max(0.01),
                 )
             {
@@ -2611,23 +2643,26 @@ impl E6App {
                     ),
                 ));
             }
-            if count == 1 && element.rotation == 0.0 {
-                let min = to_screen(element.bounds.min);
-                let max = to_screen(element.bounds.max);
-                let rect = egui::Rect::from_two_pos(min, max);
+            if count == 1 {
                 // Eight handles: four corners + four edge midpoints, matching
-                // editor::resize::handle_at.
-                for corner in [
-                    rect.left_top(),
-                    rect.center_top(),
-                    rect.right_top(),
-                    rect.right_center(),
-                    rect.right_bottom(),
-                    rect.center_bottom(),
-                    rect.left_bottom(),
-                    rect.left_center(),
-                ] {
-                    let handle = egui::Rect::from_center_size(corner, egui::Vec2::splat(8.0));
+                // editor::resize::handle_at. Rotated elements draw them at the
+                // painted positions of the local handle points.
+                let bounds = element.bounds;
+                let center = bounds.center();
+                let locals = [
+                    Point::new(bounds.min.x, bounds.min.y),
+                    Point::new(center.x, bounds.min.y),
+                    Point::new(bounds.max.x, bounds.min.y),
+                    Point::new(bounds.max.x, center.y),
+                    Point::new(bounds.max.x, bounds.max.y),
+                    Point::new(center.x, bounds.max.y),
+                    Point::new(bounds.min.x, bounds.max.y),
+                    Point::new(bounds.min.x, center.y),
+                ];
+                for local in locals {
+                    let world = e6_scene::geom::rotate_about(local, center, element.rotation);
+                    let handle =
+                        egui::Rect::from_center_size(to_screen(world), egui::Vec2::splat(8.0));
                     painter.rect_filled(handle, 2.0, egui::Color32::WHITE);
                     painter.rect_stroke(handle, 2.0, stroke, egui::StrokeKind::Middle);
                 }

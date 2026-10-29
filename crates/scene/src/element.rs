@@ -125,41 +125,20 @@ impl Element {
     /// Map a world point into this element's local (unrotated) frame: the inverse
     /// of the rotation about the bounds center.
     pub fn to_local(&self, world: Point) -> Point {
-        if self.rotation == 0.0 {
-            return world;
-        }
-        let center = self.bounds.center();
-        let (sin, cos) = f64::from(-self.rotation).sin_cos();
-        let dx = f64::from(world.x) - f64::from(center.x);
-        let dy = f64::from(world.y) - f64::from(center.y);
-        Point::new(
-            ((dx * cos - dy * sin) + f64::from(center.x)) as f32,
-            ((dx * sin + dy * cos) + f64::from(center.y)) as f32,
-        )
+        crate::geom::unrotate_about(world, self.bounds.center(), self.rotation)
     }
 
     /// The four bounds corners rotated about the bounds center (the outline a
     /// rotated element paints).
     pub fn rotated_corners(&self) -> [Point; 4] {
-        if self.rotation == 0.0 {
-            return [
-                self.bounds.min,
-                Point::new(self.bounds.max.x, self.bounds.min.y),
-                self.bounds.max,
-                Point::new(self.bounds.min.x, self.bounds.max.y),
-            ];
-        }
         let center = self.bounds.center();
-        let (sin, cos) = f64::from(self.rotation).sin_cos();
-        let (hw, hh) = (
-            f64::from(self.bounds.size().width) / 2.0,
-            f64::from(self.bounds.size().height) / 2.0,
-        );
-        let (cx, cy) = (f64::from(center.x), f64::from(center.y));
-        [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)].map(|(dx, dy)| {
-            let (rx, ry) = (dx * cos - dy * sin, dx * sin + dy * cos);
-            Point::new((cx + rx) as f32, (cy + ry) as f32)
-        })
+        [
+            self.bounds.min,
+            Point::new(self.bounds.max.x, self.bounds.min.y),
+            self.bounds.max,
+            Point::new(self.bounds.min.x, self.bounds.max.y),
+        ]
+        .map(|corner| crate::geom::rotate_about(corner, center, self.rotation))
     }
 
     /// Builder: outline style (shapes drawn stroked, not filled).

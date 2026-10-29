@@ -106,6 +106,33 @@ impl Aabb {
     }
 }
 
+/// Rotate an offset vector by `rotation` radians, counter-clockwise about the
+/// origin (the same convention as the renderer's `Affine::rotate`).
+pub fn rotate_vec(dx: f32, dy: f32, rotation: f32) -> (f32, f32) {
+    let (sin, cos) = f64::from(rotation).sin_cos();
+    let (dx, dy) = (f64::from(dx), f64::from(dy));
+    ((dx * cos - dy * sin) as f32, (dx * sin + dy * cos) as f32)
+}
+
+/// The inverse of [`rotate_vec`].
+pub fn unrotate_vec(dx: f32, dy: f32, rotation: f32) -> (f32, f32) {
+    rotate_vec(dx, dy, -rotation)
+}
+
+/// Rotate `p` about `center` by `rotation` radians.
+pub fn rotate_about(p: Point, center: Point, rotation: f32) -> Point {
+    if rotation == 0.0 {
+        return p;
+    }
+    let (rx, ry) = rotate_vec(p.x - center.x, p.y - center.y, rotation);
+    Point::new(rx + center.x, ry + center.y)
+}
+
+/// The inverse of [`rotate_about`].
+pub fn unrotate_about(p: Point, center: Point, rotation: f32) -> Point {
+    rotate_about(p, center, -rotation)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
