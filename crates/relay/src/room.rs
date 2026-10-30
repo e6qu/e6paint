@@ -79,6 +79,7 @@ pub fn spawn(
     snapshot: Vec<u8>,
     persist: PersistFn,
     compact_every: usize,
+    room_id: String,
 ) {
     tokio::spawn(async move {
         let mut doc = LoroDoc::new();
@@ -119,6 +120,15 @@ pub fn spawn(
                                 log::info!(
                                     "batch from {} imported ({status:?}); broadcasting",
                                     peer.0
+                                );
+                                // Compact element geometry after every import:
+                                // the e2e specs assert board state from this
+                                // line instead of parsing snapshots.
+                                let elements = doc.get_map("elements").get_deep_value();
+                                log::info!(
+                                    "DOCDBG room={} {}",
+                                    room_id,
+                                    serde_json::to_string(&elements).unwrap_or_default()
                                 );
                                 dirty = true;
                                 batches_since_compact += 1;

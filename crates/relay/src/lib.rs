@@ -192,6 +192,7 @@ async fn join_room(
             persisted_snapshot.clone(),
             persist,
             state.compact_every,
+            room_id.to_owned(),
         );
     }
 

@@ -1449,12 +1449,25 @@ impl E6App {
                             self.notify("view-only session: edits stay on this device");
                         }
                     }
-                    frame::TAG_SNAPSHOT | frame::TAG_BATCH => {
+                    frame::TAG_SNAPSHOT => {
+                        if let Err(err) = self.doc.apply_remote(payload) {
+                            log::error!("remote update rejected: {err}");
+                        } else {
+                            log::info!(
+                                "board snapshot applied ({} bytes) fitted={}",
+                                payload.len(),
+                                self.fitted
+                            );
+                            // Fit once, when the joined board first arrives.
+                            // Incremental batches must never move the camera.
+                            self.fitted = false;
+                        }
+                    }
+                    frame::TAG_BATCH => {
                         if let Err(err) = self.doc.apply_remote(payload) {
                             log::error!("remote update rejected: {err}");
                         } else {
                             log::info!("remote board update applied ({} bytes)", payload.len());
-                            self.fitted = false;
                         }
                     }
                     frame::TAG_PRESENCE => match e6_collab::presence_from_json(payload) {
@@ -1952,6 +1965,19 @@ impl E6App {
             .map(|screen| self.camera.screen_to_world(screen))
     }
 
+    /// World position of the current press's origin. Drag-start handling must
+    /// use this instead of [`Self::world_at`]: when the press and the first
+    /// moves land in one frame (fast input, batched drivers), the latest
+    /// pointer position has already advanced past the press, and recording it
+    /// as the gesture origin shifts every subsequent delta.
+    fn world_at_press(&self, response: &egui::Response, pixels_per_point: f32) -> Option<Point> {
+        response
+            .ctx
+            .input(|input| input.pointer.press_origin())
+            .map(|pos| canvas_pos(response, pos, pixels_per_point))
+            .map(|screen| self.camera.screen_to_world(screen))
+    }
+
     /// Dispatch the active tool's gesture. `select` moves elements; creation tools build
     /// a draft and commit it as one element.
     fn handle_canvas_gesture(&mut self, response: &egui::Response, pixels_per_point: f32) {
@@ -1998,7 +2024,7 @@ impl E6App {
             return;
         }
         if response.drag_started()
-            && let Some(press_world) = self.world_at(response, pixels_per_point)
+            && let Some(press_world) = self.world_at_press(response, pixels_per_point)
         {
             // Corner handles (single selection) take precedence over moving.
             if self.selection.len() == 1 {
@@ -2168,14 +2194,14 @@ impl E6App {
     }
 
     fn pen_gesture(&mut self, response: &egui::Response, pixels_per_point: f32) {
-        if response.drag_started() {
-            if let Some(world) = self.world_at(response, pixels_per_point) {
-                self.draft = Some(Draft::Pen {
-                    points: vec![world],
-                    last_screen: world,
-                });
-            }
-            return;
+        if response.drag_started()
+            && self.draft.is_none()
+            && let Some(world) = self.world_at_press(response, pixels_per_point)
+        {
+            self.draft = Some(Draft::Pen {
+                points: vec![world],
+                last_screen: world,
+            });
         }
         if response.dragged() {
             let Some(world) = self.world_at(response, pixels_per_point) else {
@@ -2219,22 +2245,24 @@ impl E6App {
             Tool::Ellipse => ElementKind::Ellipse,
             _ => return,
         };
+        // Started, dragged, and stopped can coalesce into one frame (fast
+        // input, headless drivers): run the whole sequence in one pass so the
+        // draft is created, moved, and committed instead of orphaned.
         if response.drag_started()
-            && let Some(world) = self.world_at(response, pixels_per_point)
+            && let Some(world) = self.world_at_press(response, pixels_per_point)
+            && self.draft.is_none()
         {
             self.draft = Some(Draft::Shape {
                 kind,
                 start: world,
                 end: world,
             });
-            return;
         }
         if response.dragged()
             && let Some(world) = self.world_at(response, pixels_per_point)
             && let Some(Draft::Shape { end, .. }) = self.draft.as_mut()
         {
             *end = world;
-            return;
         }
         if response.drag_stopped()
             && let Some(Draft::Shape { kind, start, end }) = self.draft.take()
@@ -2246,20 +2274,19 @@ impl E6App {
 
     fn connector_gesture(&mut self, response: &egui::Response, pixels_per_point: f32) {
         if response.drag_started()
-            && let Some(world) = self.world_at(response, pixels_per_point)
+            && let Some(world) = self.world_at_press(response, pixels_per_point)
+            && self.draft.is_none()
         {
             self.draft = Some(Draft::Connector {
                 start: world,
                 end: world,
             });
-            return;
         }
         if response.dragged()
             && let Some(world) = self.world_at(response, pixels_per_point)
             && let Some(Draft::Connector { end, .. }) = self.draft.as_mut()
         {
             *end = world;
-            return;
         }
         if response.drag_stopped()
             && let Some(Draft::Connector { start, end }) = self.draft.take()

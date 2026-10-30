@@ -201,8 +201,9 @@ mod tests {
     }
 }
 
-/// The outcome of one alignment-snap pass: adjusted drag deltas plus the world
-/// coordinates of the guide lines to draw (vertical guides are x values).
+/// The outcome of one alignment-snap pass: the snap **corrections** to add to
+/// the drag delta (zero when nothing snapped) plus the world coordinates of
+/// the guide lines to draw (vertical guides are x values).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SnapResult {
     pub dx: f32,
@@ -214,12 +215,9 @@ pub struct SnapResult {
 /// Miro-style snapping: while dragging `moving` by `(dx, dy)`, align its center
 /// or edges to any other bounds' center/edges within `threshold` (screen px
 /// converted to world units by the caller). One guide per axis — the nearest.
+/// Returns only the corrections: the caller applies them with `dx += result.dx`.
 pub fn snap_delta(moving: Aabb, others: &[Aabb], dx: f32, dy: f32, threshold: f32) -> SnapResult {
-    let mut result = SnapResult {
-        dx,
-        dy,
-        ..Default::default()
-    };
+    let mut result = SnapResult::default();
 
     let moving_center_x = moving.center().x + dx;
     let moving_center_y = moving.center().y + dy;
@@ -287,11 +285,12 @@ mod snap_tests {
 
     #[test]
     fn centers_snap_within_threshold() {
-        // dx=4 lands the moving center at 54; the other's center is at 54.
+        // dx=4 lands the moving center at 54; the other's center is at 54:
+        // already aligned, so the correction is zero.
         let moving = rect(0.0, 0.0);
         let others = [rect(4.0, 30.0)];
         let result = snap_delta(moving, &others, 4.0, 0.0, 6.0);
-        assert_eq!(result.dx, 4.0, "already aligned: no extra snap");
+        assert_eq!(result.dx, 0.0, "already aligned: no extra snap");
         assert_eq!(result.guides_x, vec![54.0]);
         assert!(result.guides_y.is_empty());
     }
@@ -301,7 +300,7 @@ mod snap_tests {
         let moving = rect(0.0, 0.0);
         let others = [rect(120.0, 0.0)];
         let result = snap_delta(moving, &others, 4.0, 0.0, 6.0);
-        assert_eq!(result.dx, 4.0);
+        assert_eq!(result.dx, 0.0);
         assert!(result.guides_x.is_empty());
     }
 
@@ -318,11 +317,26 @@ mod snap_tests {
 
     #[test]
     fn nearest_candidate_wins() {
-        // dx=3 lands the moving center at 53; candidates at 54 and 56: 54 wins.
+        // dx=3 lands the moving center at 53; candidates at 54 and 56: 54 wins
+        // with a +1 correction.
         let moving = rect(0.0, 0.0);
         let others = [rect(4.0, 0.0), rect(6.0, 0.0)];
         let result = snap_delta(moving, &others, 3.0, 0.0, 6.0);
-        assert_eq!(result.dx, 4.0);
+        assert_eq!(result.dx, 1.0);
         assert_eq!(result.guides_x, vec![54.0]);
+    }
+
+    #[test]
+    fn corrections_never_exceed_the_threshold() {
+        // The correction must stay bounded even when the candidate list is
+        // dense — a snap can never overtake the drag.
+        let moving = rect(0.0, 0.0);
+        let others = [rect(4.0, 0.0), rect(8.0, 0.0), rect(2.0, 0.0)];
+        let result = snap_delta(moving, &others, 5.0, 0.0, 6.0);
+        assert!(
+            result.dx.abs() <= 6.0,
+            "correction {} exceeds threshold",
+            result.dx
+        );
     }
 }
