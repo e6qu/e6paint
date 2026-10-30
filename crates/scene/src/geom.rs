@@ -98,6 +98,14 @@ impl Aabb {
             && self.max.y >= other.min.y
     }
 
+    /// The axis-aligned box covering both points.
+    pub fn from_two_points(a: Point, b: Point) -> Self {
+        Self {
+            min: Point::new(a.x.min(b.x), a.y.min(b.y)),
+            max: Point::new(a.x.max(b.x), a.y.max(b.y)),
+        }
+    }
+
     pub fn union(self, other: Self) -> Self {
         Self {
             min: Point::new(self.min.x.min(other.min.x), self.min.y.min(other.min.y)),

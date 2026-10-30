@@ -29,15 +29,7 @@ const FRAME_EMA_WEIGHT: f32 = 0.1;
 const INK: u32 = 0xFF1D_1D2B;
 /// Sticky note fill.
 const STICKY_FILL: u32 = 0xFFF7_E97B;
-/// Default world-unit sizes for placed text and sticky notes.
-const TEXT_PLACE_SIZE: f32 = 240.0;
-const STICKY_SIZE: f32 = 220.0;
-/// Screen-pixel distance before a pen sample is recorded.
-const PEN_SAMPLE_PX: f32 = 3.0;
-/// Screen-pixel movement below which a press-release counts as a click.
-const CLICK_SLOP_PX: f32 = 4.0;
 /// New frame size in world units.
-const FRAME_SIZE: f32 = 640.0;
 /// Camera tween duration for present-mode transitions.
 const PRESENT_TWEEN: Duration = Duration::from_millis(380);
 
@@ -78,81 +70,6 @@ struct CollabSession {
     remote_cursors: Vec<RemoteCursor>,
 }
 
-/// An in-progress creation gesture.
-enum Draft {
-    Pen {
-        points: Vec<Point>,
-        last_screen: Point,
-    },
-    Shape {
-        kind: ElementKind,
-        start: Point,
-        end: Point,
-    },
-    Connector {
-        start: Point,
-        end: Point,
-    },
-}
-
-impl Draft {
-    /// The element the draft would create right now (preview or final).
-    fn to_spec(&self) -> ElementSpec {
-        match self {
-            Draft::Pen { points, .. } => {
-                let bounds = Aabb::from_points(points).unwrap_or(Aabb {
-                    min: Point::ZERO,
-                    max: Point::new(1.0, 1.0),
-                });
-                ElementSpec::simple(ElementKind::Stroke, bounds, INK)
-                    .outlined(INK, 2.5)
-                    .with_points(points.clone())
-            }
-            Draft::Shape { kind, start, end } => {
-                ElementSpec::simple(*kind, rect_between(*start, *end), 0x0000_0000)
-                    .outlined(INK, 2.0)
-            }
-            Draft::Connector { start, end } => {
-                let bounds = Aabb::from_points(&[*start, *end]).unwrap_or(Aabb {
-                    min: Point::ZERO,
-                    max: Point::new(1.0, 1.0),
-                });
-                ElementSpec::simple(ElementKind::Connector, bounds, INK)
-                    .outlined(INK, 2.0)
-                    .with_points(vec![*start, *end])
-            }
-        }
-    }
-}
-
-fn rect_between(a: Point, b: Point) -> Aabb {
-    Aabb {
-        min: Point::new(a.x.min(b.x), a.y.min(b.y)),
-        max: Point::new(a.x.max(b.x), a.y.max(b.y)),
-    }
-}
-
-/// An in-progress move gesture over the selection.
-struct DragState {
-    last_world: Point,
-}
-
-/// An in-progress corner-resize gesture over a single selected element.
-struct ResizeState {
-    handle: e6_editor::resize::ResizeHandle,
-    original: Aabb,
-    /// Element rotation (radians); zero takes the axis-aligned path.
-    rotation: f32,
-    /// Painted position of the gesture's fixed anchor point.
-    anchor_world: Point,
-}
-
-/// An in-progress marquee selection (world-space corners).
-struct MarqueeState {
-    start: Point,
-    end: Point,
-}
-
 /// An animated camera transition.
 struct CameraTween {
     from: Camera,
@@ -180,12 +97,6 @@ impl CameraTween {
     }
 }
 
-impl MarqueeState {
-    fn bounds(&self) -> Aabb {
-        rect_between(self.start, self.end)
-    }
-}
-
 /// Root application state.
 /// The async OPFS restore's verdict: a usable board, or an empty store (which
 /// seeds the demo). Read errors leave the slot empty — the board starts fresh.
@@ -198,11 +109,8 @@ enum RestoreOutcome {
 pub struct E6App {
     doc: BoardDoc,
     selection: Selection,
-    tool: Tool,
-    drag: Option<DragState>,
-    resize: Option<ResizeState>,
-    marquee: Option<MarqueeState>,
-    draft: Option<Draft>,
+    gesture: e6_editor::gesture::GestureState,
+    last_inserted: Option<ElementId>,
     editing: Option<ElementId>,
     editing_focused: bool,
     /// Present mode: index into [`BoardDoc::frames`].
@@ -229,8 +137,6 @@ pub struct E6App {
     last_viewport: Size,
     /// Canvas rect in egui points; anchor for the zoom widget.
     last_canvas_rect: Option<egui::Rect>,
-    /// Alignment guides from the current drag (Miro pink lines), world coords.
-    alignment_guides: Vec<AlignmentGuide>,
     /// Dot grid on/off (the canvas dots are a visual aid, not content).
     show_grid: bool,
     /// A committed gesture is not yet autosaved.
@@ -269,12 +175,6 @@ pub struct E6App {
 }
 
 /// One alignment guide line from a drag snap, in world coordinates.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum AlignmentGuide {
-    Vertical(f32),
-    Horizontal(f32),
-}
-
 /// Pointer position in canvas-local physical pixels: the camera's screen space
 /// starts at the canvas rect's top-left, which sits inside the egui panels. Every
 /// pointer→world conversion must go through this, or selections and clicks land
@@ -304,11 +204,8 @@ impl E6App {
         let mut app = Self {
             doc: BoardDoc::new(),
             selection: Selection::new(),
-            tool: Tool::Select,
-            drag: None,
-            marquee: None,
-            resize: None,
-            draft: None,
+            gesture: e6_editor::gesture::GestureState::default(),
+            last_inserted: None,
             editing: None,
             editing_focused: false,
             present: None,
@@ -335,7 +232,6 @@ impl E6App {
             drawer_tab: DrawerTab::Library,
             last_viewport: Size::new(1.0, 1.0),
             last_canvas_rect: None,
-            alignment_guides: Vec::new(),
             show_grid: true,
             dirty: false,
             code_panel: e6_ui::CodePanelState::default(),
@@ -561,7 +457,7 @@ impl E6App {
                 self.doc.commit();
                 self.dirty = true;
                 self.selection.set([id]);
-                self.tool = Tool::Select;
+                self.gesture.tool = Tool::Select;
                 // The file picker took focus; shortcuts live on the canvas.
                 #[cfg(target_arch = "wasm32")]
                 self.refocus_canvas();
@@ -673,8 +569,10 @@ impl E6App {
     fn replace_doc(&mut self, doc: BoardDoc) {
         self.doc = doc;
         self.selection.clear();
-        self.drag = None;
-        self.draft = None;
+        self.gesture = e6_editor::gesture::GestureState {
+            tool: self.gesture.tool,
+            ..e6_editor::gesture::GestureState::default()
+        };
         self.editing = None;
         self.fitted = false;
         self.dirty = true;
@@ -966,7 +864,7 @@ impl E6App {
             }
             e6_ui::PanelAction::Select(id) => {
                 self.selection.set([id]);
-                self.tool = Tool::Select;
+                self.gesture.tool = Tool::Select;
             }
             e6_ui::PanelAction::ToggleHidden(id) => {
                 let current = elements.iter().find(|e| e.id == id).map(|e| e.hidden);
@@ -1072,7 +970,7 @@ impl E6App {
                         self.doc.commit();
                         self.dirty = true;
                         self.selection.set(ids);
-                        self.tool = Tool::Select;
+                        self.gesture.tool = Tool::Select;
                     }
                     Err(err) => log::error!("library insert failed: {err}"),
                 }
@@ -1084,7 +982,7 @@ impl E6App {
                 self.doc.commit();
                 self.dirty = true;
                 self.selection.set([id]);
-                self.tool = Tool::Select;
+                self.gesture.tool = Tool::Select;
             }
             Err(err) => log::error!("library insert failed: {err}"),
         }
@@ -1655,7 +1553,12 @@ impl E6App {
             if self.editing.is_some() {
                 return;
             }
-            if self.draft.take().is_some() || self.marquee.take().is_some() {
+            let commands = e6_editor::gesture::cancel(&mut self.gesture);
+            let consumed = !commands.is_empty();
+            for command in commands {
+                self.apply_command(command);
+            }
+            if consumed {
                 // draft or marquee discarded
             } else {
                 self.selection.clear();
@@ -1777,9 +1680,9 @@ impl E6App {
     fn apply_tool(&mut self, tool: Tool) {
         #[cfg(target_arch = "wasm32")]
         self.end_editing();
-        self.draft = None;
-        self.marquee = None;
-        self.tool = tool;
+        self.gesture.draft = None;
+        self.gesture.marquee = None;
+        self.gesture.tool = tool;
     }
 
     /// Wheel pans; pinch or cmd/ctrl+wheel zooms at the pointer (the Excalidraw/Miro
@@ -1825,8 +1728,8 @@ impl E6App {
             ));
         }
 
-        let pans_on_drag = self.tool == Tool::Pan || self.space_held(response);
-        if pans_on_drag && self.draft.is_none() && response.dragged() {
+        let pans_on_drag = self.gesture.tool == Tool::Pan || self.space_held(response);
+        if pans_on_drag && self.gesture.draft.is_none() && response.dragged() {
             let drag = response.drag_delta();
             self.camera.pan_by(Point::new(
                 drag.x * pixels_per_point,
@@ -1883,22 +1786,6 @@ impl E6App {
         (element.kind == ElementKind::Sticky).then_some(element.color)
     }
 
-    /// Union bounds of the selected elements.
-    fn selection_bounds(&self) -> Option<Aabb> {
-        let elements = self.doc.elements();
-        let mut bounds: Option<Aabb> = None;
-        for id in self.selection.iter() {
-            let Some(element) = elements.iter().find(|e| e.id == id) else {
-                continue;
-            };
-            bounds = Some(match bounds {
-                Some(existing) => existing.union(element.bounds),
-                None => element.bounds,
-            });
-        }
-        bounds
-    }
-
     /// Rotate every selected element by `delta` radians (counter-clockwise).
     fn rotate_selection(&mut self, delta: f32) {
         let elements = self.doc.elements();
@@ -1942,16 +1829,6 @@ impl E6App {
         }
     }
 
-    /// Every element the dragged selection could align to (not itself selected).
-    fn alignment_candidates(&self, _moving: &Aabb) -> Vec<Aabb> {
-        self.doc
-            .elements()
-            .iter()
-            .filter(|e| !self.selection.contains(e.id))
-            .map(|e| e.bounds)
-            .collect()
-    }
-
     /// Select gestures are suppressed while space is held: space+drag pans (the
     /// Miro convention), regardless of the active tool.
     fn space_held(&self, response: &egui::Response) -> bool {
@@ -1986,393 +1863,142 @@ impl E6App {
             response.ctx.set_cursor_icon(egui::CursorIcon::Grab);
             return;
         }
-        match self.tool {
-            Tool::Select => self.select_gesture(response, pixels_per_point),
-            Tool::Pan => {}
-            Tool::Pen => self.pen_gesture(response, pixels_per_point),
-            Tool::Rect | Tool::Ellipse => self.shape_gesture(response, pixels_per_point),
-            Tool::Connector => self.connector_gesture(response, pixels_per_point),
-            Tool::Text | Tool::Sticky | Tool::Frame => {
-                self.place_gesture(response, pixels_per_point)
+        let mut events: Vec<e6_editor::gesture::PointerEvent> = Vec::new();
+        if response.double_clicked()
+            && let Some(at) = self.world_at_press(response, pixels_per_point)
+        {
+            events.push(e6_editor::gesture::PointerEvent::DoubleClick { at });
+        } else if response.drag_started()
+            && let Some(at) = self.world_at_press(response, pixels_per_point)
+        {
+            events.push(e6_editor::gesture::PointerEvent::Press { at });
+        }
+        if response.dragged()
+            && let Some(at) = self.world_at(response, pixels_per_point)
+        {
+            events.push(e6_editor::gesture::PointerEvent::Move { at });
+        }
+        if response.drag_stopped() {
+            if let Some(at) = self.world_at(response, pixels_per_point) {
+                events.push(e6_editor::gesture::PointerEvent::Release { at });
             }
-            Tool::Image => {}
+        } else if response.clicked()
+            && let Some(at) = self.world_at(response, pixels_per_point)
+        {
+            events.push(e6_editor::gesture::PointerEvent::Release { at });
+        }
+        if events.is_empty() {
+            return;
+        }
+        let elements = self.doc.elements();
+        let view = e6_editor::gesture::View {
+            zoom: self.camera.zoom,
+            shift: response.ctx.input(|input| input.modifiers.shift),
+            pen_color: self.pen.color,
+            pen_width: self.pen.width,
+        };
+        for event in events {
+            for command in
+                e6_editor::gesture::step(&mut self.gesture, &elements, &self.selection, view, event)
+            {
+                self.apply_command(command);
+            }
         }
     }
 
-    fn select_gesture(&mut self, response: &egui::Response, pixels_per_point: f32) {
-        let shift = response.ctx.input(|input| input.modifiers.shift);
-        if self.space_held(response) {
-            // Space+drag belongs to panning (handled in handle_camera_input).
-            return;
-        }
-        // Double-click on a text-bearing element reopens its inline editor.
-        if response.double_clicked()
-            && let Some(world) = self.world_at(response, pixels_per_point)
-            && let Some(element) = self.topmost_at(world)
-            && matches!(element.kind, ElementKind::Text | ElementKind::Sticky)
-        {
-            self.selection.set([element.id]);
-            self.editing = Some(element.id);
-            return;
-        }
-        // Miro convention: double-click empty canvas drops a sticky and opens it.
-        if response.double_clicked()
-            && let Some(world) = self.world_at(response, pixels_per_point)
-            && self.topmost_at(world).is_none()
-        {
-            self.place_sticky_at(world);
-            return;
-        }
-        if response.drag_started()
-            && let Some(press_world) = self.world_at_press(response, pixels_per_point)
-        {
-            // Corner handles (single selection) take precedence over moving.
-            if self.selection.len() == 1 {
-                let grab_world = 10.0 / self.camera.zoom.max(0.01);
-                if let Some(selected_id) = self.selection.iter().next()
-                    && let Some(element) = self.doc.elements().iter().find(|e| e.id == selected_id)
-                {
-                    // Handles live in the element's local frame; map the press
-                    // there so rotated elements hit-test against their painted
-                    // geometry.
-                    let local_press = e6_scene::geom::unrotate_about(
-                        press_world,
-                        element.bounds.center(),
-                        element.rotation,
-                    );
-                    if let Some(handle) =
-                        e6_editor::resize::handle_at(element.bounds, local_press, grab_world)
-                    {
-                        let anchor_world = e6_scene::geom::rotate_about(
-                            e6_editor::resize::anchor_point(handle, element.bounds),
-                            element.bounds.center(),
-                            element.rotation,
-                        );
-                        self.resize = Some(ResizeState {
-                            handle,
-                            original: element.bounds,
-                            rotation: element.rotation,
-                            anchor_world,
-                        });
-                        return;
-                    }
-                }
-            }
-            match self.topmost_at(press_world) {
-                Some(element) => {
-                    if shift {
-                        self.selection.toggle(element.id);
-                    } else {
-                        if !self.selection.contains(element.id) {
-                            let mut members = match element.kind {
-                                ElementKind::Frame => self.doc.frame_members(element.id),
-                                _ => self.doc.group_members(element.id),
-                            };
-                            members.push(element.id);
-                            self.selection.set(members);
-                        }
-                        self.drag = Some(DragState {
-                            last_world: press_world,
-                        });
-                    }
-                }
-                None => {
-                    self.selection.clear();
-                    self.marquee = Some(MarqueeState {
-                        start: press_world,
-                        end: press_world,
-                    });
-                }
-            }
-        }
-
-        if response.dragged()
-            && let Some(drag) = self.drag.as_ref()
-            && let Some(current) = self.world_at(response, pixels_per_point)
-        {
-            if let Some(resize) = self.resize.as_ref()
-                && let Some(selected_id) = self.selection.iter().next()
-            {
-                let bounds = if resize.rotation == 0.0 {
-                    e6_editor::resize::resize_bounds(resize.original, resize.handle, current)
-                } else {
-                    e6_editor::resize::resize_bounds_rotated(
-                        resize.original,
-                        resize.handle,
-                        resize.rotation,
-                        current,
-                        resize.anchor_world,
-                    )
-                };
-                if let Err(err) = self.doc.set_geometry(selected_id, bounds) {
-                    log::error!("resize failed: {err}");
-                }
-                return;
-            }
-
-            let mut dx = current.x - drag.last_world.x;
-            let mut dy = current.y - drag.last_world.y;
-            // Miro-style alignment snapping to other elements' centers/edges.
-            if let Some(moving) = self.selection_bounds() {
-                const THRESHOLD: f32 = 6.0 / 1.0; // screen px; world threshold scaled below
-                let threshold = 6.0 / self.camera.zoom;
-                let _ = THRESHOLD;
-                let snap = e6_editor::align::snap_delta(
-                    moving,
-                    &self.alignment_candidates(&moving),
-                    dx,
-                    dy,
-                    threshold,
-                );
-                dx += snap.dx;
-                dy += snap.dy;
-                self.alignment_guides = snap
-                    .guides_x
-                    .into_iter()
-                    .map(AlignmentGuide::Vertical)
-                    .chain(snap.guides_y.into_iter().map(AlignmentGuide::Horizontal))
-                    .collect();
-            }
-            let locked: Vec<ElementId> = self
-                .doc
-                .elements()
-                .iter()
-                .filter(|e| e.locked && self.selection.contains(e.id))
-                .map(|e| e.id)
-                .collect();
-            for id in self.selection.iter() {
-                if locked.contains(&id) {
-                    continue;
-                }
+    /// Apply one reducer command to the document. The gesture reducer decides;
+    /// this only performs the mutation and surfaces errors.
+    fn apply_command(&mut self, command: e6_editor::gesture::Command) {
+        match command {
+            e6_editor::gesture::Command::Translate { id, dx, dy } => {
                 if let Err(err) = self.doc.translate(id, dx, dy) {
                     log::error!("move failed: {err}");
                 }
-            }
-            if let Some(drag) = self.drag.as_mut() {
-                drag.last_world = current;
-            }
-        }
-
-        if response.drag_stopped() {
-            if let Some(marquee) = self.marquee.take() {
-                let region = marquee.bounds();
-                let clicked_without_drag = region.size().width * self.camera.zoom < CLICK_SLOP_PX
-                    && region.size().height * self.camera.zoom < CLICK_SLOP_PX;
-                if !clicked_without_drag {
-                    let hits: Vec<ElementId> = self
-                        .doc
-                        .elements()
-                        .into_iter()
-                        .filter(|e| !e.hidden && e.bounds.intersects(region))
-                        .map(|e| e.id)
-                        .collect();
-                    self.selection.set(hits);
-                }
-            } else if self.drag.take().is_some() {
-                // Dropping re-evaluates frame membership; commit keeps it in the same
-                // undo step as the move.
-                for id in self.selection.iter() {
-                    if let Err(err) = self.doc.reattach_to_frame(id) {
-                        log::error!("frame reattach failed for {id:?}: {err}");
-                    }
-                }
-                // One release = one commit = one undo step, even if nothing moved.
-                self.doc.commit();
-                self.dirty = true;
-            } else if self.resize.take().is_some() {
-                // Resize drop: re-evaluate frame membership, same commit semantics
-                // as the move (one release = one undo step).
-                for id in self.selection.iter() {
-                    if let Err(err) = self.doc.reattach_to_frame(id) {
-                        log::error!("frame reattach failed for {id:?}: {err}");
-                    }
-                }
-                self.doc.commit();
                 self.dirty = true;
             }
-        }
-    }
-
-    fn pen_gesture(&mut self, response: &egui::Response, pixels_per_point: f32) {
-        if response.drag_started()
-            && self.draft.is_none()
-            && let Some(world) = self.world_at_press(response, pixels_per_point)
-        {
-            self.draft = Some(Draft::Pen {
-                points: vec![world],
-                last_screen: world,
-            });
-        }
-        if response.dragged() {
-            let Some(world) = self.world_at(response, pixels_per_point) else {
-                return;
-            };
-            if let Some(Draft::Pen {
-                points,
-                last_screen,
-            }) = self.draft.as_mut()
-            {
-                let moved =
-                    ((world.x - last_screen.x).hypot(world.y - last_screen.y)) * self.camera.zoom;
-                if moved > PEN_SAMPLE_PX {
-                    points.push(world);
-                    *last_screen = world;
+            e6_editor::gesture::Command::SetGeometry { id, bounds } => {
+                if let Err(err) = self.doc.set_geometry(id, bounds) {
+                    log::error!("resize failed: {err}");
                 }
+                self.dirty = true;
             }
-            return;
-        }
-        if response.drag_stopped()
-            && let Some(Draft::Pen { points, .. }) = self.draft.take()
-            && points.len() >= 2
-            && let Some(bounds) = Aabb::from_points(&points)
-        {
-            let spec = ElementSpec::simple(ElementKind::Stroke, bounds, self.pen.color)
-                .outlined(self.pen.color, self.pen.width)
-                .with_points(points);
-            match self.doc.insert_element(&spec) {
-                Ok(_) => {
-                    self.doc.commit();
-                    self.dirty = true;
-                }
-                Err(err) => log::error!("stroke insert failed: {err}"),
-            }
-        }
-    }
-
-    fn shape_gesture(&mut self, response: &egui::Response, pixels_per_point: f32) {
-        let kind = match self.tool {
-            Tool::Rect => ElementKind::Rect,
-            Tool::Ellipse => ElementKind::Ellipse,
-            _ => return,
-        };
-        // Started, dragged, and stopped can coalesce into one frame (fast
-        // input, headless drivers): run the whole sequence in one pass so the
-        // draft is created, moved, and committed instead of orphaned.
-        if response.drag_started()
-            && let Some(world) = self.world_at_press(response, pixels_per_point)
-            && self.draft.is_none()
-        {
-            self.draft = Some(Draft::Shape {
+            e6_editor::gesture::Command::InsertShape {
                 kind,
-                start: world,
-                end: world,
-            });
-        }
-        if response.dragged()
-            && let Some(world) = self.world_at(response, pixels_per_point)
-            && let Some(Draft::Shape { end, .. }) = self.draft.as_mut()
-        {
-            *end = world;
-        }
-        if response.drag_stopped()
-            && let Some(Draft::Shape { kind, start, end }) = self.draft.take()
-            && (start.x - end.x).hypot(start.y - end.y) * self.camera.zoom > CLICK_SLOP_PX
-        {
-            self.finish_creation(Draft::Shape { kind, start, end }.to_spec());
+                bounds,
+                fill,
+                stroke,
+                stroke_width,
+            } => {
+                let spec = ElementSpec::simple(kind, bounds, fill).outlined(stroke, stroke_width);
+                match self.doc.insert_element(&spec) {
+                    Ok(id) => self.last_inserted = Some(id),
+                    Err(err) => log::error!("insert failed: {err}"),
+                }
+            }
+            e6_editor::gesture::Command::InsertStroke {
+                bounds,
+                points,
+                color,
+                width,
+            } => {
+                let spec = ElementSpec::simple(ElementKind::Stroke, bounds, color)
+                    .outlined(color, width)
+                    .with_points(points);
+                match self.doc.insert_element(&spec) {
+                    Ok(id) => self.last_inserted = Some(id),
+                    Err(err) => log::error!("stroke insert failed: {err}"),
+                }
+            }
+            e6_editor::gesture::Command::InsertPlaced {
+                kind,
+                bounds,
+                fill,
+                font,
+                name,
+                stroke,
+            } => {
+                let mut spec = ElementSpec::simple(kind, bounds, fill).with_text(name, font);
+                if let Some((color, width)) = stroke {
+                    spec = spec.outlined(color, width);
+                }
+                match self.doc.insert_element(&spec) {
+                    Ok(id) => self.last_inserted = Some(id),
+                    Err(err) => log::error!("placement failed: {err}"),
+                }
+            }
+            e6_editor::gesture::Command::Select(ids) => self.selection.set(ids),
+            e6_editor::gesture::Command::ToggleSelect(id) => self.selection.toggle(id),
+            e6_editor::gesture::Command::ClearSelection => self.selection.clear(),
+            e6_editor::gesture::Command::SelectInserted => {
+                if let Some(id) = self.last_inserted {
+                    self.selection.set([id]);
+                }
+            }
+            e6_editor::gesture::Command::BeginEditing(id) => {
+                self.editing = Some(id);
+                self.editing_focused = false;
+            }
+            e6_editor::gesture::Command::BeginEditingInserted => {
+                if let Some(id) = self.last_inserted {
+                    self.editing = Some(id);
+                    self.editing_focused = false;
+                }
+            }
+            e6_editor::gesture::Command::ReattachSelectionToFrames => {
+                for id in self.selection.iter() {
+                    if let Err(err) = self.doc.reattach_to_frame(id) {
+                        log::error!("frame reattach failed for {id:?}: {err}");
+                    }
+                }
+            }
+            e6_editor::gesture::Command::Commit => {
+                self.doc.commit();
+                self.dirty = true;
+            }
         }
     }
-
-    fn connector_gesture(&mut self, response: &egui::Response, pixels_per_point: f32) {
-        if response.drag_started()
-            && let Some(world) = self.world_at_press(response, pixels_per_point)
-            && self.draft.is_none()
-        {
-            self.draft = Some(Draft::Connector {
-                start: world,
-                end: world,
-            });
-        }
-        if response.dragged()
-            && let Some(world) = self.world_at(response, pixels_per_point)
-            && let Some(Draft::Connector { end, .. }) = self.draft.as_mut()
-        {
-            *end = world;
-        }
-        if response.drag_stopped()
-            && let Some(Draft::Connector { start, end }) = self.draft.take()
-            && (start.x - end.x).hypot(start.y - end.y) * self.camera.zoom > CLICK_SLOP_PX
-        {
-            self.finish_creation(Draft::Connector { start, end }.to_spec());
-        }
-    }
-
     /// Text and sticky tools place on click, then hand over to the text editor.
-    fn place_gesture(&mut self, response: &egui::Response, pixels_per_point: f32) {
-        if !response.clicked() {
-            return;
-        }
-        let Some(at) = self.world_at(response, pixels_per_point) else {
-            return;
-        };
-        let (kind, size, fill, font) = match self.tool {
-            Tool::Text => (ElementKind::Text, TEXT_PLACE_SIZE, INK, 28.0),
-            Tool::Frame => (ElementKind::Frame, FRAME_SIZE, 0x0000_0000, 20.0),
-            _ => (ElementKind::Sticky, STICKY_SIZE, STICKY_FILL, 24.0),
-        };
-        let short_side = match kind {
-            ElementKind::Sticky => size,
-            ElementKind::Frame => size * 0.75,
-            _ => 48.0,
-        };
-        let name = if kind == ElementKind::Frame {
-            format!("Frame {}", self.doc.frames().len() + 1)
-        } else {
-            String::new()
-        };
-        let mut spec = ElementSpec::simple(
-            kind,
-            Aabb::from_min_size(at, Size::new(size, short_side)),
-            fill,
-        )
-        .with_text(name, font);
-        if kind == ElementKind::Frame {
-            spec = spec.outlined(0xFF7C_7CE8, 2.0);
-        }
-        match self.doc.insert_element(&spec) {
-            Ok(id) => {
-                self.doc.commit();
-                self.dirty = true;
-                self.selection.set([id]);
-                self.editing = Some(id);
-                self.editing_focused = false;
-                self.tool = Tool::Select;
-            }
-            Err(err) => log::error!("placement failed: {err}"),
-        }
-    }
-
     /// Miro convention: double-click empty canvas drops a sticky and opens it.
-    fn place_sticky_at(&mut self, world: Point) {
-        let spec = ElementSpec::simple(
-            ElementKind::Sticky,
-            Aabb::from_min_size(world, Size::new(STICKY_SIZE, STICKY_SIZE)),
-            STICKY_FILL,
-        );
-        match self.doc.insert_element(&spec) {
-            Ok(id) => {
-                self.doc.commit();
-                self.dirty = true;
-                self.selection.set([id]);
-                self.editing = Some(id);
-                self.editing_focused = false;
-                self.tool = Tool::Select;
-            }
-            Err(err) => log::error!("sticky placement failed: {err}"),
-        }
-    }
-
-    fn finish_creation(&mut self, spec: ElementSpec) {
-        match self.doc.insert_element(&spec) {
-            Ok(id) => {
-                self.doc.commit();
-                self.dirty = true;
-                self.selection.set([id]);
-                self.tool = Tool::Select;
-            }
-            Err(err) => log::error!("insert failed: {err}"),
-        }
-    }
-
     /// Topmost unlocked, visible element under a world point (paint-order reverse
     /// scan). Locked elements stay marquee-selectable so they can be unlocked again;
     /// hidden elements are unreachable from canvas entirely.
@@ -2442,19 +2068,45 @@ impl E6App {
         elements: &[Element],
     ) {
         let mut elements = elements.to_vec();
-        if let Some(draft) = self.draft.as_ref() {
-            let mut preview = Element::new(
-                ElementId::from_raw(0),
-                ElementKind::Rect,
-                Aabb::from_min_size(Point::ZERO, Size::new(1.0, 1.0)),
-                INK,
-            );
-            let spec = draft.to_spec();
-            preview.kind = spec.kind;
-            preview.bounds = spec.bounds;
-            preview.stroke_color = spec.stroke_color;
-            preview.stroke_width = spec.stroke_width;
-            preview.points = spec.points.clone();
+        if let Some(draft) = self.gesture.draft.as_ref() {
+            let preview = match draft {
+                e6_editor::gesture::Draft::Pen { points, .. } => {
+                    let Some(bounds) = Aabb::from_points(points) else {
+                        return;
+                    };
+                    let mut element = Element::new(
+                        ElementId::from_raw(0),
+                        ElementKind::Stroke,
+                        bounds,
+                        self.pen.color,
+                    );
+                    element.stroke_width = self.pen.width;
+                    element.points = points.clone();
+                    element
+                }
+                e6_editor::gesture::Draft::Shape { kind, start, end } => {
+                    let mut element = Element::new(
+                        ElementId::from_raw(0),
+                        *kind,
+                        Aabb::from_two_points(*start, *end),
+                        0x0000_0000,
+                    );
+                    element.stroke_color = INK;
+                    element.stroke_width = 2.0;
+                    element
+                }
+                e6_editor::gesture::Draft::Connector { start, end } => {
+                    let mut element = Element::new(
+                        ElementId::from_raw(0),
+                        ElementKind::Connector,
+                        Aabb::from_two_points(*start, *end),
+                        0x0000_0000,
+                    );
+                    element.stroke_color = INK;
+                    element.stroke_width = 2.0;
+                    element
+                }
+            };
             elements.push(preview);
         }
 
@@ -2519,8 +2171,8 @@ impl E6App {
 
         // Hover affordance: the element the cursor would grab lights up before
         // the click (Select tool only, not while dragging or space-panning).
-        if self.tool == Tool::Select
-            && self.drag.is_none()
+        if self.gesture.tool == Tool::Select
+            && self.gesture.drag.is_none()
             && !ui.input(|i| i.key_down(egui::Key::Space))
             && let Some(pos) = ui.input(|i| i.pointer.hover_pos())
         {
@@ -2595,7 +2247,7 @@ impl E6App {
         }
 
         // Marquee selection rectangle, drawn as canvas chrome above the scene.
-        if let Some(marquee) = self.marquee.as_ref() {
+        if let Some(marquee) = self.gesture.marquee.as_ref() {
             let a = self.camera.world_to_screen(marquee.start);
             let b = self.camera.world_to_screen(marquee.end);
             let rect = egui::Rect::from_two_pos(
@@ -3025,7 +2677,7 @@ impl eframe::App for E6App {
             self.dirty = false;
         }
 
-        if let Some(picked) = draw_tool_bar(ui, self.tool) {
+        if let Some(picked) = draw_tool_bar(ui, self.gesture.tool) {
             self.apply_tool(picked);
         }
         self.hud.title = self.doc.title();
@@ -3057,7 +2709,7 @@ impl eframe::App for E6App {
 
         // The right drawer consumes canvas space, so it draws before the canvas.
         let sticky_color = self.selected_sticky_color();
-        let pen_settings = (self.tool == Tool::Pen).then_some(&mut self.pen);
+        let pen_settings = (self.gesture.tool == Tool::Pen).then_some(&mut self.pen);
         let (drawer_tab, panel_action, code_action) = e6_ui::draw_right_drawer(
             ui,
             self.drawer_tab,
@@ -3084,7 +2736,7 @@ impl eframe::App for E6App {
         });
         // Tool-appropriate cursor (Miro convention); space+drag overrides to grab
         // inside handle_canvas_gesture.
-        response.ctx.set_cursor_icon(match self.tool {
+        response.ctx.set_cursor_icon(match self.gesture.tool {
             Tool::Select => egui::CursorIcon::Default,
             Tool::Pan => egui::CursorIcon::Grab,
             Tool::Text => egui::CursorIcon::Text,

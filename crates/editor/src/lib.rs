@@ -1,9 +1,11 @@
-//! Tools state machine, selection, and gesture application.
+//! Tools, selection, and the pointer-gesture reducer.
 //!
-//! The tool set below is the locked v1 surface; the state machine and gestures are not
-//! implemented yet.
+//! [`gesture`] is the pure interaction state machine: pointer events in,
+//! board commands out. The shell adapts egui input to events and applies the
+//! commands to the document.
 
 pub mod align;
+pub mod gesture;
 pub mod resize;
 
 use std::collections::BTreeSet;
@@ -11,8 +13,9 @@ use std::collections::BTreeSet;
 use e6_scene::{Aabb, ElementId};
 
 /// Board tools (locked set for v1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Tool {
+    #[default]
     Select,
     Pan,
     Pen,
