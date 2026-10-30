@@ -111,6 +111,12 @@ pub struct E6App {
     selection: Selection,
     gesture: e6_editor::gesture::GestureState,
     last_inserted: Option<ElementId>,
+    /// Screen-reader live region (web): announces board/selection changes.
+    #[cfg(target_arch = "wasm32")]
+    live_region: Option<web_sys::Element>,
+    /// The last announced summary; updates only on change.
+    #[cfg(target_arch = "wasm32")]
+    announced: String,
     editing: Option<ElementId>,
     editing_focused: bool,
     /// Present mode: index into [`BoardDoc::frames`].
@@ -206,6 +212,10 @@ impl E6App {
             selection: Selection::new(),
             gesture: e6_editor::gesture::GestureState::default(),
             last_inserted: None,
+            #[cfg(target_arch = "wasm32")]
+            live_region: None,
+            #[cfg(target_arch = "wasm32")]
+            announced: String::new(),
             editing: None,
             editing_focused: false,
             present: None,
@@ -1762,6 +1772,77 @@ impl E6App {
         }
     }
 
+    /// The screen-reader announcement for the current board state. Pure so
+    /// the wording is testable; the wasm shell publishes it to an aria-live
+    /// region whenever it changes.
+    #[cfg(any(target_arch = "wasm32", test))]
+    fn board_announcement(total: usize, selected: usize) -> String {
+        fn count(n: usize, noun: &str) -> String {
+            if n == 1 {
+                format!("1 {noun}")
+            } else {
+                format!("{n} {noun}s")
+            }
+        }
+        match selected {
+            0 => format!("{} on the board, nothing selected", count(total, "element")),
+            n => format!(
+                "{} on the board, {} selected",
+                count(total, "element"),
+                count(n, "element")
+            ),
+        }
+    }
+
+    /// The hidden aria-live region screen readers listen to, created once.
+    #[cfg(target_arch = "wasm32")]
+    fn ensure_live_region() -> Option<web_sys::Element> {
+        let document = web_sys::window()?.document()?;
+        if let Some(existing) = document.get_element_by_id("e6-live-region") {
+            return Some(existing);
+        }
+        let region = document.create_element("div").ok()?;
+        region.set_id("e6-live-region");
+        region
+            .set_attribute("aria-live", "polite")
+            .map_err(|err| log::error!("live region: {err:?}"))
+            .ok();
+        region
+            .set_attribute("aria-atomic", "true")
+            .map_err(|err| log::error!("live region: {err:?}"))
+            .ok();
+        region
+            .set_attribute(
+                "style",
+                "position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap",
+            )
+            .map_err(|err| log::error!("live region: {err:?}"))
+            .ok();
+        if let Some(body) = document.body() {
+            body.append_with_node_1(&region)
+                .map_err(|err| log::error!("live region append: {err:?}"))
+                .ok();
+        }
+        Some(region)
+    }
+
+    /// Announce board/selection changes to screen readers (web only).
+    #[cfg(target_arch = "wasm32")]
+    fn update_screen_reader_announcement(&mut self) {
+        let summary = Self::board_announcement(self.hud.total_elements, self.hud.selected_elements);
+        if summary == self.announced {
+            return;
+        }
+        if self.live_region.is_none() {
+            self.live_region = Self::ensure_live_region();
+        }
+        let Some(region) = self.live_region.as_ref() else {
+            return;
+        };
+        region.set_text_content(Some(&summary));
+        self.announced = summary;
+    }
+
     /// A saved board matching the pre-1.0 demo scatter signature: thousands of
     /// Rect/Ellipse elements with no text. Such autosaves predate the welcome
     /// board and are replaced instead of restored.
@@ -2517,6 +2598,8 @@ impl eframe::App for E6App {
         let elements = self.doc.elements();
         self.hud.total_elements = elements.len();
         self.hud.selected_elements = self.selection.len();
+        #[cfg(target_arch = "wasm32")]
+        self.update_screen_reader_announcement();
 
         // Present mode owns the input: advance the tween, navigate, skip editing.
         if self.present_step(ui.ctx(), viewport) {
@@ -2765,6 +2848,41 @@ impl eframe::App for E6App {
         self.draw_text_editor(ui.ctx(), pixels_per_point);
 
         ui.ctx().request_repaint();
+    }
+}
+
+#[cfg(test)]
+mod announcement_tests {
+    use super::*;
+
+    #[test]
+    fn announcements_cover_selected_and_empty_states() {
+        assert_eq!(
+            E6App::board_announcement(0, 0),
+            "0 elements on the board, nothing selected"
+        );
+        assert_eq!(
+            E6App::board_announcement(11, 0),
+            "11 elements on the board, nothing selected"
+        );
+        assert_eq!(
+            E6App::board_announcement(11, 1),
+            "11 elements on the board, 1 element selected"
+        );
+        assert_eq!(
+            E6App::board_announcement(11, 3),
+            "11 elements on the board, 3 elements selected"
+        );
+    }
+
+    #[test]
+    fn announcements_are_stable_for_unchanged_state() {
+        // The updater announces only on change; identical states must produce
+        // identical summaries so the region is not re-read every frame.
+        assert_eq!(
+            E6App::board_announcement(5, 2),
+            E6App::board_announcement(5, 2)
+        );
     }
 }
 
