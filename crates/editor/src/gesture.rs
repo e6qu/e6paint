@@ -991,6 +991,76 @@ mod tests {
         assert!(h.selection.is_empty());
     }
 
+    /// A tiny deterministic PRNG (LCG): model-based sequences stay stable
+    /// across runs without a property-test dependency.
+    struct Lcg(u64);
+
+    impl Lcg {
+        fn next(&mut self) -> f32 {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            ((self.0 >> 33) as f32 / (u32::MAX as f32)) * 600.0 + 20.0
+        }
+
+        fn flip(&mut self) -> bool {
+            self.next() > 320.0
+        }
+    }
+
+    /// Model-based property: for random press/move/release sequences (with
+    /// idle frames and re-pressed points mixed in), the moved element always
+    /// ends exactly at press + pointer delta — tracking is exact regardless
+    /// of how the driver chops the gesture.
+    #[test]
+    fn random_event_sequences_always_track_the_pointer_exactly() {
+        let mut seed = Lcg(0x5EED_1234_ABCD_0001);
+        for round in 0..64u64 {
+            let mut h = Harness::new(Tool::Select, vec![rect(1, 200.0, 200.0, 60.0, 60.0)]);
+            // The press must land inside the element for the move to start.
+            let press_at = (200.0 + seed.next() % 55.0, 200.0 + seed.next() % 55.0);
+            h.feed(press(press_at.0, press_at.1));
+
+            let waypoints = 1 + (round % 7) as usize;
+            // The element follows the waypoint path; the release position
+            // itself never moves anything.
+            let mut last_waypoint = press_at;
+            for _ in 0..waypoints {
+                let at = (seed.next(), seed.next());
+                h.feed(move_to(at.0, at.1));
+                if seed.flip() {
+                    // An idle frame: the driver re-delivered the same point.
+                    h.feed(move_to(at.0, at.1));
+                }
+                last_waypoint = at;
+            }
+            if seed.flip() {
+                // Some gestures end at the last waypoint.
+                h.feed(release(last_waypoint.0, last_waypoint.1));
+            } else {
+                let at = (seed.next(), seed.next());
+                h.feed(release(at.0, at.1));
+            }
+
+            let element = &h.elements[0];
+            let expected_min = (
+                200.0 + (last_waypoint.0 - press_at.0),
+                200.0 + (last_waypoint.1 - press_at.1),
+            );
+            let actual = element.bounds.min;
+            assert!(
+                (actual.x - expected_min.0).abs() < 1e-3
+                    && (actual.y - expected_min.1).abs() < 1e-3,
+                "round {round}: element at ({:.3},{:.3}), expected ({:.3},{:.3})",
+                actual.x,
+                actual.y,
+                expected_min.0,
+                expected_min.1
+            );
+        }
+    }
+
     #[test]
     fn escape_drops_the_draft_and_then_clears_the_selection() {
         let mut h = Harness::new(Tool::Select, Vec::new());

@@ -162,3 +162,46 @@ mod tests {
         }
     }
 }
+
+/// The zoom factor a wheel event resolves to, or None when the wheel is a
+/// pan instead. Pinch gestures and command/ctrl+wheel zoom exponentially at
+/// the pointer (the Excalidraw/Miro convention); a plain wheel never zooms.
+pub fn wheel_zoom_factor(zoom_delta: f32, scroll_y: f32, command: bool) -> Option<f32> {
+    let wheel_zoom = zoom_delta != 1.0 || (command && scroll_y != 0.0);
+    if !wheel_zoom {
+        return None;
+    }
+    let mut factor = zoom_delta;
+    if command && scroll_y != 0.0 {
+        factor *= (scroll_y * 0.01).exp();
+    }
+    Some(factor)
+}
+
+#[cfg(test)]
+mod wheel_tests {
+    use super::*;
+
+    #[test]
+    fn plain_wheel_is_never_a_zoom() {
+        assert_eq!(wheel_zoom_factor(1.0, -120.0, false), None);
+    }
+
+    #[test]
+    fn pinch_zoom_passes_the_delta_through() {
+        assert_eq!(wheel_zoom_factor(1.2, 0.0, false), Some(1.2));
+        assert_eq!(wheel_zoom_factor(1.2, 0.0, true), Some(1.2));
+    }
+
+    #[test]
+    fn command_wheel_magnifies_exponentially() -> Result<(), Box<dyn std::error::Error>> {
+        let factor = wheel_zoom_factor(1.0, 100.0, true).ok_or("cmd+wheel should zoom")?;
+        assert!((factor - 1_f64.exp() as f32).abs() < 1e-4);
+        Ok(())
+    }
+
+    #[test]
+    fn command_wheel_without_scroll_is_inert() {
+        assert_eq!(wheel_zoom_factor(1.0, 0.0, true), None);
+    }
+}

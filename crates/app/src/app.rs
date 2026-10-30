@@ -1712,20 +1712,18 @@ impl E6App {
             .hover_pos()
             .map(|pos| canvas_pos(response, pos, pixels_per_point));
 
-        let wheel_zoom = zoom_delta != 1.0 || (zoom_modifier && scroll.y != 0.0);
-        if wheel_zoom {
-            let mut factor = zoom_delta;
-            if zoom_modifier && scroll.y != 0.0 {
-                factor *= (scroll.y * 0.01).exp();
+        match e6_scene::camera::wheel_zoom_factor(zoom_delta, scroll.y, zoom_modifier) {
+            Some(factor) => {
+                if let Some(at) = pointer {
+                    self.camera.zoom_at(at, factor);
+                }
             }
-            if let Some(at) = pointer {
-                self.camera.zoom_at(at, factor);
+            None => {
+                self.camera.pan_by(Point::new(
+                    scroll.x * pixels_per_point,
+                    scroll.y * pixels_per_point,
+                ));
             }
-        } else {
-            self.camera.pan_by(Point::new(
-                scroll.x * pixels_per_point,
-                scroll.y * pixels_per_point,
-            ));
         }
 
         let pans_on_drag = self.gesture.tool == Tool::Pan || self.space_held(response);
