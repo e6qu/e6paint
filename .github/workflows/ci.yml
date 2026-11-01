@@ -46,6 +46,13 @@ jobs:
             echo "::error::wasm is $gz bytes gzipped; budget is $limit"
             exit 1
           fi
+          worker_gz=$(gzip -9 -c crates/app/dist/worker/render_worker_bg.wasm | wc -c)
+          echo "render worker wasm: $(wc -c < crates/app/dist/worker/render_worker_bg.wasm) bytes raw, $worker_gz bytes gzipped"
+          worker_limit=$((2 * 1024 * 1024))
+          if [ "$worker_gz" -gt "$worker_limit" ]; then
+            echo "::error::render worker wasm is $worker_gz bytes gzipped; budget is $worker_limit"
+            exit 1
+          fi
       - uses: actions/upload-artifact@v7
         with:
           name: e6paint-web
