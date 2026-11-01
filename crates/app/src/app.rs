@@ -628,7 +628,7 @@ impl E6App {
             return;
         };
         let mut bounds = first.bounds;
-        for element in &elements {
+        for element in elements {
             bounds = bounds.union(element.bounds);
         }
         self.camera = Self::camera_fit(bounds, viewport);
@@ -1904,8 +1904,13 @@ impl E6App {
             return None;
         }
         let id = self.selection.iter().next()?;
-        let element = self.doc.elements().into_iter().find(|e| e.id == id)?;
-        (element.kind == ElementKind::Sticky).then_some(element.color)
+        self.doc.with_elements(|elements| {
+            elements
+                .iter()
+                .find(|e| e.id == id)
+                .filter(|e| e.kind == ElementKind::Sticky)
+                .map(|e| e.color)
+        })
     }
 
     /// Rotate every selected element by `delta` radians (counter-clockwise).
@@ -2191,11 +2196,13 @@ impl E6App {
     /// scan). Locked elements stay marquee-selectable so they can be unlocked again;
     /// hidden elements are unreachable from canvas entirely.
     fn topmost_at(&self, world: Point) -> Option<Element> {
-        self.doc
-            .elements()
-            .into_iter()
-            .rev()
-            .find(|e| !e.locked && !e.hidden && e.bounds.contains(e.to_local(world)))
+        self.doc.with_elements(|elements| {
+            elements
+                .iter()
+                .rev()
+                .find(|e| !e.locked && !e.hidden && e.bounds.contains(e.to_local(world)))
+                .cloned()
+        })
     }
 
     /// The inline text editor for text/sticky elements, anchored over the canvas.
@@ -2368,8 +2375,7 @@ impl E6App {
             // Resize-handle hover wins: show the axis resize cursor. The
             // handles sit on the single element, or on the selection's union
             // for a multi selection (all members unrotated).
-            let doc_elements = self.doc.elements();
-            let selection_elements: Vec<&Element> = doc_elements
+            let selection_elements: Vec<&Element> = elements
                 .iter()
                 .filter(|e| self.selection.contains(e.id))
                 .collect();
@@ -2475,9 +2481,9 @@ impl E6App {
             );
         }
 
-        self.draw_selection_overlay(ui, rect, pixels_per_point);
+        self.draw_selection_overlay(ui, rect, pixels_per_point, &elements);
 
-        self.draw_minimap(ui, rect, pixels_per_point);
+        self.draw_minimap(ui, rect, pixels_per_point, &elements);
         self.draw_zoom_widget(ui, rect);
         draw_status_bar(ui, &self.hud);
     }
@@ -2490,6 +2496,7 @@ impl E6App {
         ui: &mut egui::Ui,
         canvas_rect: egui::Rect,
         pixels_per_point: f32,
+        elements: &[Element],
     ) {
         if self.selection.is_empty() {
             return;
@@ -2500,7 +2507,6 @@ impl E6App {
             egui::Color32::from_rgb(13, 153, 255),
         );
         let count = self.selection.len();
-        let elements = self.doc.elements();
         let to_screen = |world: Point| {
             let screen = self.camera.world_to_screen(world);
             egui::Pos2::new(screen.x / pixels_per_point, screen.y / pixels_per_point)
@@ -2662,8 +2668,13 @@ impl E6App {
 impl E6App {
     /// Minimap: element bounds scaled into a fixed box, viewport outlined, click/drag
     /// to move the camera. Dense boards draw a capped sample.
-    fn draw_minimap(&mut self, ui: &mut egui::Ui, available: egui::Rect, pixels_per_point: f32) {
-        let elements = self.doc.elements();
+    fn draw_minimap(
+        &mut self,
+        ui: &mut egui::Ui,
+        available: egui::Rect,
+        pixels_per_point: f32,
+        elements: &[Element],
+    ) {
         if elements.is_empty() {
             return;
         }
@@ -2677,7 +2688,7 @@ impl E6App {
         );
 
         let mut bounds = elements[0].bounds;
-        for element in &elements {
+        for element in elements {
             bounds = bounds.union(element.bounds);
         }
         let scale =

@@ -398,3 +398,30 @@ fn random_operation_sequences_converge_seed_sweep() -> Result<(), Box<dyn std::e
 
     Ok(())
 }
+
+#[test]
+fn with_elements_reads_without_allocating_a_copy() -> Result<(), Box<dyn std::error::Error>> {
+    let doc = BoardDoc::new();
+    let spec = ElementSpec::simple(
+        ElementKind::Rect,
+        Aabb::from_min_size(
+            e6_scene::Point::new(1.0, 2.0),
+            e6_scene::Size::new(30.0, 40.0),
+        ),
+        0xFF00_00FF,
+    );
+    doc.insert_element(&spec)?;
+    doc.commit();
+
+    let seen = doc.with_elements(|elements| {
+        assert_eq!(elements.len(), 1);
+        elements[0].bounds.size().width
+    });
+    assert!((seen - 30.0).abs() < 1e-6);
+
+    // An empty board still reaches the closure.
+    let empty = BoardDoc::new();
+    let count = empty.with_elements(|elements| elements.len());
+    assert_eq!(count, 0);
+    Ok(())
+}

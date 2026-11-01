@@ -262,6 +262,18 @@ impl BoardDoc {
             .unwrap_or_default()
     }
 
+    /// Run `f` against the read model without cloning it — the hot-path
+    /// accessor (hover hit-testing, per-frame chrome) uses this to avoid a
+    /// full element-vector copy on every call.
+    pub fn with_elements<R>(&self, f: impl FnOnce(&[Element]) -> R) -> R {
+        match self.state.lock() {
+            Ok(state) => f(&state.elements),
+            // A poisoned lock is surfaced by the cloning accessor; here the
+            // closure still runs, over an empty slice.
+            Err(_) => f(&[]),
+        }
+    }
+
     /// The `meta.title` value.
     pub fn title(&self) -> String {
         self.meta_str("title")
