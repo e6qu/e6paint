@@ -78,12 +78,14 @@ pub struct Drag {
 }
 
 /// A handle resize in progress.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ResizeGesture {
     pub handle: resize::ResizeHandle,
     pub original: Aabb,
     pub rotation: f32,
     pub anchor: Point,
+    /// Original bounds per selected element, in selection order.
+    pub members: Vec<(ElementId, Aabb)>,
 }
 
 /// A rubber-band selection in progress.
@@ -313,22 +315,32 @@ fn select_step(
         }
         PointerEvent::Move { at } => {
             if let Some(resize) = state.resize.as_ref() {
-                let bounds = if resize.rotation == 0.0 {
-                    resize::resize_bounds(resize.original, resize.handle, at)
+                if resize.rotation == 0.0 {
+                    let new_union = resize::resize_bounds(resize.original, resize.handle, at);
+                    for (id, orig) in &resize.members {
+                        // Locked members hold still, as with translation.
+                        if elements.iter().any(|e| e.id == *id && e.locked) {
+                            continue;
+                        }
+                        let mapped = resize::scale_bounds_into(*orig, resize.original, new_union);
+                        commands.push(Command::SetGeometry {
+                            id: *id,
+                            bounds: mapped,
+                        });
+                    }
                 } else {
-                    resize::resize_bounds_rotated(
-                        resize.original,
+                    // A single rotated element keeps its local-frame resize.
+                    let Some((id, orig)) = resize.members.first() else {
+                        return commands;
+                    };
+                    let bounds = resize::resize_bounds_rotated(
+                        *orig,
                         resize.handle,
                         resize.rotation,
                         at,
                         resize.anchor,
-                    )
-                };
-                if let Some(selected_id) = selection.iter().next() {
-                    commands.push(Command::SetGeometry {
-                        id: selected_id,
-                        bounds,
-                    });
+                    );
+                    commands.push(Command::SetGeometry { id: *id, bounds });
                 }
                 return commands;
             }
@@ -403,28 +415,53 @@ fn select_press(
     at: Point,
 ) -> Vec<Command> {
     let mut commands = Vec::new();
-    if selection.len() == 1 {
-        let grab = GRAB_PX / view.zoom.max(0.01);
-        let selected = selection
+    if !selection.is_empty() {
+        let selected: Vec<(ElementId, Aabb, f32)> = selection
             .iter()
-            .next()
-            .and_then(|id| elements.iter().find(|e| e.id == id));
-        if let Some(element) = selected {
-            let local = geom::unrotate_about(at, element.bounds.center(), element.rotation);
-            if let Some(handle) = resize::handle_at(element.bounds, local, grab) {
-                let anchor = geom::rotate_about(
-                    resize::anchor_point(handle, element.bounds),
-                    element.bounds.center(),
-                    element.rotation,
-                );
-                state.resize = Some(ResizeGesture {
-                    handle,
-                    original: element.bounds,
-                    rotation: element.rotation,
-                    anchor,
-                });
-                return commands;
+            .filter_map(|id| {
+                elements
+                    .iter()
+                    .find(|e| e.id == id)
+                    .map(|e| (e.id, e.bounds, e.rotation))
+            })
+            .collect();
+        let grab = GRAB_PX / view.zoom.max(0.01);
+        let all_unrotated = selected.iter().all(|(_, _, r)| *r == 0.0);
+
+        // A multi selection resizes its union when every member is unrotated;
+        // a single rotated element keeps its local-frame resize.
+        let (hit_bounds, frame_rotation, frame_center) = if selected.len() == 1 {
+            let (_, bounds, rotation) = selected[0];
+            (bounds, rotation, bounds.center())
+        } else if all_unrotated {
+            let mut union = selected[0].1;
+            for (_, bounds, _) in selected.iter().skip(1) {
+                union = union.union(*bounds);
             }
+            (union, 0.0, union.center())
+        } else {
+            // Any rotated member in a multi selection: no handles.
+            return commands;
+        };
+
+        let local = geom::unrotate_about(at, frame_center, frame_rotation);
+        if let Some(handle) = resize::handle_at(hit_bounds, local, grab) {
+            let anchor = geom::rotate_about(
+                resize::anchor_point(handle, hit_bounds),
+                frame_center,
+                frame_rotation,
+            );
+            state.resize = Some(ResizeGesture {
+                handle,
+                original: hit_bounds,
+                rotation: frame_rotation,
+                anchor,
+                members: selected
+                    .iter()
+                    .map(|(id, bounds, _)| (*id, *bounds))
+                    .collect(),
+            });
+            return commands;
         }
     }
     match topmost_at(elements, at) {
@@ -879,6 +916,129 @@ mod tests {
             ),
         }
         let _ = ResizeHandle::SouthEast;
+    }
+
+    #[test]
+    fn multi_selection_corner_drag_scales_both_members_keeping_the_anchor() {
+        let mut h = Harness::new(
+            Tool::Select,
+            vec![
+                rect(1, 0.0, 0.0, 50.0, 50.0),
+                rect(2, 100.0, 100.0, 50.0, 50.0),
+            ],
+        );
+        h.selection
+            .set([ElementId::from_raw(1), ElementId::from_raw(2)]);
+
+        // SE handle of the union (150,150): press exactly on it, drag out.
+        h.feed(press(150.0, 150.0));
+        h.feed(move_to(200.0, 200.0));
+
+        let geometries: Vec<(u64, f64, f64, f64, f64)> = h
+            .commands
+            .iter()
+            .filter_map(|c| match c {
+                Command::SetGeometry { id, bounds } => Some((
+                    id.raw(),
+                    bounds.min.x as f64,
+                    bounds.min.y as f64,
+                    bounds.size().width as f64,
+                    bounds.size().height as f64,
+                )),
+                _ => None,
+            })
+            .collect();
+
+        // The union doubled (150 -> 300 per axis, ratio 2). Member A anchored
+        // at the union's NW corner scales in place; member B's min lands at
+        // the drag point.
+        assert_eq!(geometries.len(), 2, "both members resized: {geometries:?}");
+        for geometry in &geometries {
+            let (_, _, _, w, h) = *geometry;
+            assert!((w - 66.66667).abs() < 1e-4, "width {w}");
+            assert!((h - 66.66667).abs() < 1e-4, "height {h}");
+        }
+        // Member A anchored at the union origin; member B's min at the drag
+        // point minus its scaled size.
+        assert!((geometries[0].2 - 0.0).abs() < 1e-4);
+        assert!((geometries[1].2 - 133.333_34).abs() < 1e-4);
+    }
+
+    #[test]
+    fn multi_selection_edge_drag_scales_widths_and_keeps_heights() {
+        let mut h = Harness::new(
+            Tool::Select,
+            vec![
+                rect(1, 0.0, 0.0, 50.0, 50.0),
+                rect(2, 100.0, 100.0, 50.0, 50.0),
+            ],
+        );
+        h.selection
+            .set([ElementId::from_raw(1), ElementId::from_raw(2)]);
+
+        // East handle of the union: press on (150, 75), drag right to (225, any).
+        h.feed(press(150.0, 75.0));
+        h.feed(move_to(225.0, 75.0));
+
+        let widths: Vec<(u64, f64, f64)> = h
+            .commands
+            .iter()
+            .filter_map(|c| match c {
+                Command::SetGeometry { id, bounds } => {
+                    Some((id.raw(), bounds.size().width as f64, bounds.min.y as f64))
+                }
+                _ => None,
+            })
+            .collect();
+
+        // Both widths scale by 1.5; both y positions and heights untouched.
+        assert_eq!(widths, vec![(1, 75.0, 0.0), (2, 75.0, 100.0)]);
+    }
+
+    #[test]
+    fn multi_selection_with_a_rotated_member_gets_no_handles() {
+        let mut rotated = rect(1, 0.0, 0.0, 50.0, 50.0);
+        rotated.rotation = 1.2;
+        let mut h = Harness::new(
+            Tool::Select,
+            vec![rotated, rect(2, 100.0, 100.0, 50.0, 50.0)],
+        );
+        h.selection
+            .set([ElementId::from_raw(1), ElementId::from_raw(2)]);
+
+        h.feed(press(150.0, 150.0));
+        h.feed(move_to(200.0, 200.0));
+
+        assert!(
+            h.commands.is_empty(),
+            "rotated members suppress multi resize"
+        );
+    }
+
+    #[test]
+    fn locked_members_are_skipped_by_multi_resize() {
+        let mut locked = rect(1, 0.0, 0.0, 50.0, 50.0);
+        locked.locked = true;
+        let mut h = Harness::new(
+            Tool::Select,
+            vec![locked, rect(2, 100.0, 100.0, 50.0, 50.0)],
+        );
+        h.selection
+            .set([ElementId::from_raw(1), ElementId::from_raw(2)]);
+
+        h.feed(press(150.0, 150.0));
+        h.feed(move_to(225.0, 75.0));
+
+        // Only the unlocked member is resized; the locked one stays put.
+        let touched: Vec<u64> = h
+            .commands
+            .iter()
+            .filter_map(|c| match c {
+                Command::SetGeometry { id, .. } => Some(id.raw()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(touched, vec![2]);
     }
 
     #[test]

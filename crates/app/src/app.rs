@@ -2289,17 +2289,37 @@ impl E6App {
             && let Some(pos) = ui.input(|i| i.pointer.hover_pos())
         {
             let world = canvas_pos_in(rect, pos, pixels_per_point);
-            // Resize-handle hover wins: show the diagonal resize cursor.
-            if self.selection.len() == 1
-                && let Some(selected_id) = self.selection.iter().next()
-                && let Some(element) = self.doc.elements().iter().find(|e| e.id == selected_id)
+            // Resize-handle hover wins: show the axis resize cursor. The
+            // handles sit on the single element, or on the selection's union
+            // for a multi selection (all members unrotated).
+            let doc_elements = self.doc.elements();
+            let selection_elements: Vec<&Element> = doc_elements
+                .iter()
+                .filter(|e| self.selection.contains(e.id))
+                .collect();
+            let (handle_bounds, frame_rotation, frame_center) = if selection_elements.len() == 1 {
+                let element = selection_elements[0];
+                (element.bounds, element.rotation, element.bounds.center())
+            } else if selection_elements.len() > 1
+                && selection_elements.iter().all(|e| e.rotation == 0.0)
+            {
+                let mut union = selection_elements[0].bounds;
+                for element in selection_elements.iter().skip(1) {
+                    union = union.union(element.bounds);
+                }
+                (union, 0.0, union.center())
+            } else {
+                (
+                    Aabb::from_min_size(Point::ZERO, Size::new(1.0, 1.0)),
+                    0.0,
+                    Point::ZERO,
+                )
+            };
+            if !selection_elements.is_empty()
+                && frame_rotation == 0.0
                 && let Some(handle) = e6_editor::resize::handle_at(
-                    element.bounds,
-                    e6_scene::geom::unrotate_about(
-                        world,
-                        element.bounds.center(),
-                        element.rotation,
-                    ),
+                    handle_bounds,
+                    e6_scene::geom::unrotate_about(world, frame_center, frame_rotation),
                     10.0 / self.camera.zoom.max(0.01),
                 )
             {
@@ -2405,6 +2425,54 @@ impl E6App {
         );
         let count = self.selection.len();
         let elements = self.doc.elements();
+        let to_screen = |world: Point| {
+            let screen = self.camera.world_to_screen(world);
+            egui::Pos2::new(screen.x / pixels_per_point, screen.y / pixels_per_point)
+        };
+        // Multi selection: the union box carries the resize handles (all
+        // members unrotated, matching the reducer's resize support).
+        let selected: Vec<&Element> = elements
+            .iter()
+            .filter(|e| self.selection.contains(e.id))
+            .collect();
+        if count > 1 {
+            let all_unrotated = selected.iter().all(|e| e.rotation == 0.0);
+            if all_unrotated {
+                let mut union = selected[0].bounds;
+                for element in selected.iter().skip(1) {
+                    union = union.union(element.bounds);
+                }
+                let min = to_screen(union.min);
+                let max = to_screen(union.max);
+                let union_rect = egui::Rect::from_two_pos(min, max);
+                painter.rect_stroke(
+                    union_rect,
+                    4.0,
+                    egui::Stroke::new(
+                        1.0 * pixels_per_point,
+                        egui::Color32::from_rgb(13, 153, 255),
+                    ),
+                    egui::StrokeKind::Middle,
+                );
+                let center = union.center();
+                let handle_locals = [
+                    Point::new(union.min.x, union.min.y),
+                    Point::new(center.x, union.min.y),
+                    Point::new(union.max.x, union.min.y),
+                    Point::new(union.max.x, center.y),
+                    Point::new(union.max.x, union.max.y),
+                    Point::new(center.x, union.max.y),
+                    Point::new(union.min.x, union.max.y),
+                    Point::new(union.min.x, center.y),
+                ];
+                for local in handle_locals {
+                    let handle =
+                        egui::Rect::from_center_size(to_screen(local), egui::Vec2::splat(8.0));
+                    painter.rect_filled(handle, 2.0, egui::Color32::WHITE);
+                    painter.rect_stroke(handle, 2.0, stroke, egui::StrokeKind::Middle);
+                }
+            }
+        }
         for id in self.selection.iter() {
             let Some(element) = elements.iter().find(|e| e.id == id) else {
                 continue;

@@ -109,6 +109,23 @@ pub fn resize_bounds(original: Aabb, handle: ResizeHandle, world: Point) -> Aabb
     Aabb::from_min_size(min, e6_scene::Size::new(max.x - min.x, max.y - min.y))
 }
 
+/// Map `orig` through the affine transform that takes the union bounds `from`
+/// to `to`: per-axis position and size scaling. Corner handles scale sizes
+/// and positions together (Miro behavior); MIN_SIZE is enforced on the union,
+/// so members may shrink below it — the union slop wins.
+pub fn scale_bounds_into(orig: Aabb, from: Aabb, to: Aabb) -> Aabb {
+    let sx = to.size().width / from.size().width.max(1e-6);
+    let sy = to.size().height / from.size().height.max(1e-6);
+    let min = Point::new(
+        to.min.x + (orig.min.x - from.min.x) * sx,
+        to.min.y + (orig.min.y - from.min.y) * sy,
+    );
+    Aabb::from_min_size(
+        min,
+        e6_scene::Size::new(orig.size().width * sx, orig.size().height * sy),
+    )
+}
+
 /// The local-frame point the `handle` sits on (bounds corners for corners,
 /// edge midpoints for edges).
 pub fn handle_point(handle: ResizeHandle, bounds: Aabb) -> Point {
