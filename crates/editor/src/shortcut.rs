@@ -19,6 +19,10 @@ pub enum ShortcutKey {
     Y,
     Enter,
     Digit(u8),
+    A,
+    G,
+    BracketRight,
+    BracketLeft,
     C,
     X,
     V,
@@ -62,6 +66,11 @@ pub enum ShortcutAction {
     /// selection when nothing was consumed.
     CancelGesture,
     DeleteSelection,
+    SelectAll,
+    Group,
+    Ungroup,
+    BringToFront,
+    SendToBack,
     RotateSelection,
     DuplicateSelection,
     CopySelection,
@@ -157,6 +166,19 @@ pub fn shortcut_action(
             };
             Some(ShortcutAction::ApplyTool(tool))
         }
+        ShortcutKey::A if mods.command_or_ctrl() && !ctx.editing => Some(ShortcutAction::SelectAll),
+        ShortcutKey::G if mods.command_or_ctrl() && mods.shift && ctx.has_selection => {
+            Some(ShortcutAction::Ungroup)
+        }
+        ShortcutKey::G if mods.command_or_ctrl() && ctx.has_selection => {
+            Some(ShortcutAction::Group)
+        }
+        ShortcutKey::BracketRight if ctx.has_selection && !ctx.editing => {
+            Some(ShortcutAction::BringToFront)
+        }
+        ShortcutKey::BracketLeft if ctx.has_selection && !ctx.editing => {
+            Some(ShortcutAction::SendToBack)
+        }
         ShortcutKey::ArrowLeft if ctx.has_selection && !ctx.editing => {
             Some(ShortcutAction::NudgeSelection { dx: -step, dy: 0.0 })
         }
@@ -192,6 +214,60 @@ mod tests {
             has_selection,
             clipboard_nonempty: true,
         }
+    }
+
+    #[test]
+    fn select_all_group_and_z_order_map_with_guards() {
+        // cmd+A selects all — even on an empty board (harmless) — but never
+        // while a text editor owns cmd+A for its own select-all.
+        assert_eq!(
+            shortcut_action(ShortcutKey::A, mods(true, false), ctx(false, false, false)),
+            Some(ShortcutAction::SelectAll)
+        );
+        assert_eq!(
+            shortcut_action(ShortcutKey::A, mods(true, false), ctx(true, false, true)),
+            None,
+            "editing: cmd+A selects the text"
+        );
+        // Group needs 2+ selected (shell validates the count); ungroup needs
+        // cmd+shift+G.
+        assert_eq!(
+            shortcut_action(ShortcutKey::G, mods(true, false), ctx(false, false, true)),
+            Some(ShortcutAction::Group)
+        );
+        assert_eq!(
+            shortcut_action(ShortcutKey::G, mods(true, true), ctx(false, false, true)),
+            Some(ShortcutAction::Ungroup)
+        );
+        assert_eq!(
+            shortcut_action(ShortcutKey::G, mods(true, false), ctx(false, false, false)),
+            None
+        );
+        // Z-order brackets: bare keys, selection required.
+        assert_eq!(
+            shortcut_action(
+                ShortcutKey::BracketRight,
+                mods(false, false),
+                ctx(false, false, true)
+            ),
+            Some(ShortcutAction::BringToFront)
+        );
+        assert_eq!(
+            shortcut_action(
+                ShortcutKey::BracketLeft,
+                mods(false, false),
+                ctx(false, false, true)
+            ),
+            Some(ShortcutAction::SendToBack)
+        );
+        assert_eq!(
+            shortcut_action(
+                ShortcutKey::BracketRight,
+                mods(false, false),
+                ctx(false, false, false)
+            ),
+            None
+        );
     }
 
     #[test]

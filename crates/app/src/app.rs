@@ -1597,7 +1597,7 @@ impl E6App {
         // Read per-event key state (see key_pressed_with_modifiers): the
         // global queue is cleared by text-agent focus churn on room-first
         // pages, so shortcuts poll each key individually.
-        let tracked: [(egui::Key, e6_editor::shortcut::ShortcutKey); 9] = [
+        let tracked: [(egui::Key, e6_editor::shortcut::ShortcutKey); 13] = [
             (egui::Key::Escape, e6_editor::shortcut::ShortcutKey::Escape),
             (egui::Key::Delete, e6_editor::shortcut::ShortcutKey::Delete),
             (
@@ -1610,6 +1610,16 @@ impl E6App {
             (egui::Key::Z, e6_editor::shortcut::ShortcutKey::Z),
             (egui::Key::Y, e6_editor::shortcut::ShortcutKey::Y),
             (egui::Key::Enter, e6_editor::shortcut::ShortcutKey::Enter),
+            (egui::Key::A, e6_editor::shortcut::ShortcutKey::A),
+            (egui::Key::G, e6_editor::shortcut::ShortcutKey::G),
+            (
+                egui::Key::CloseBracket,
+                e6_editor::shortcut::ShortcutKey::BracketRight,
+            ),
+            (
+                egui::Key::OpenBracket,
+                e6_editor::shortcut::ShortcutKey::BracketLeft,
+            ),
         ];
         let digits: [(egui::Key, u8); 9] = [
             (egui::Key::Num1, 1),
@@ -1726,6 +1736,14 @@ impl E6App {
                 self.dirty = true;
             }
             ShortcutAction::ApplyTool(tool) => self.apply_tool(tool),
+            ShortcutAction::SelectAll => {
+                let ids: Vec<ElementId> = self.doc.elements().iter().map(|e| e.id).collect();
+                self.selection.set(ids);
+            }
+            ShortcutAction::Group => self.run_hud_command(HudCommand::Group),
+            ShortcutAction::Ungroup => self.run_hud_command(HudCommand::Ungroup),
+            ShortcutAction::BringToFront => self.run_hud_command(HudCommand::BringToFront),
+            ShortcutAction::SendToBack => self.run_hud_command(HudCommand::SendToBack),
         }
     }
     /// Switch tools the way a tool-bar click does: leave text editing, drop any
