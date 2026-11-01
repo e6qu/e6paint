@@ -1,0 +1,2 @@
+# Regression seeds for camera property tests.
+cc 9e387ba3ce93c274f8dab61123c6ff3433e05e1b58c2202d5d23128d1423fd9d

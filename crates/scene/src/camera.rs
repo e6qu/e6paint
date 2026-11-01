@@ -140,7 +140,10 @@ mod tests {
 
     proptest! {
         /// screen→world→screen is the identity for every clamped zoom and any
-        /// finite world point (within f32 round-off at the input's magnitude).
+        /// finite world point. At high zoom with a far origin the world→screen
+        /// leg subtracts nearly-equal f32 values, so the tolerance carries the
+        /// origin's representable error through the zoom (plus a 1% relative
+        /// floor).
         #[test]
         fn screen_world_roundtrip_prop(
             origin_x in -1e4_f32..1e4,
@@ -154,8 +157,12 @@ mod tests {
             let cam = Camera { origin: Point::new(origin_x, origin_y), zoom };
             let world = Point::new(world_x, world_y);
             let back = cam.world_to_screen(cam.screen_to_world(Point::new(screen_x, screen_y)));
-            prop_assert!((back.x - screen_x).abs() <= 1e-2 * screen_x.abs().max(1.0));
-            prop_assert!((back.y - screen_y).abs() <= 1e-2 * screen_y.abs().max(1.0));
+            let tol = |screen: f32, origin: f32| {
+                1e-2 * screen.abs().max(1.0)
+                    + 512.0 * f32::EPSILON * zoom * origin.abs()
+            };
+            prop_assert!((back.x - screen_x).abs() <= tol(screen_x, origin_x));
+            prop_assert!((back.y - screen_y).abs() <= tol(screen_y, origin_y));
             let home = cam.screen_to_world(cam.world_to_screen(world));
             prop_assert!((home.x - world_x).abs() <= 1e-2 * world_x.abs().max(1.0));
             prop_assert!((home.y - world_y).abs() <= 1e-2 * world_y.abs().max(1.0));
