@@ -19,6 +19,9 @@ pub enum ShortcutKey {
     Y,
     Enter,
     Digit(u8),
+    C,
+    X,
+    V,
     ArrowLeft,
     ArrowRight,
     ArrowUp,
@@ -47,6 +50,8 @@ pub struct ShortcutContext {
     /// A text field (inline editor or the mol code panel) owns the keyboard.
     pub keyboard_busy: bool,
     pub has_selection: bool,
+    /// The board clipboard holds something to paste.
+    pub clipboard_nonempty: bool,
 }
 
 /// A keyboard-triggered board action.
@@ -59,6 +64,9 @@ pub enum ShortcutAction {
     DeleteSelection,
     RotateSelection,
     DuplicateSelection,
+    CopySelection,
+    CutSelection,
+    Paste,
     NudgeSelection {
         dx: f32,
         dy: f32,
@@ -109,6 +117,15 @@ pub fn shortcut_action(
         ShortcutKey::R if ctx.has_selection => Some(ShortcutAction::RotateSelection),
         ShortcutKey::D if mods.command_or_ctrl() && ctx.has_selection => {
             Some(ShortcutAction::DuplicateSelection)
+        }
+        ShortcutKey::C if mods.command_or_ctrl() && !ctx.editing && ctx.has_selection => {
+            Some(ShortcutAction::CopySelection)
+        }
+        ShortcutKey::X if mods.command_or_ctrl() && !ctx.editing && ctx.has_selection => {
+            Some(ShortcutAction::CutSelection)
+        }
+        ShortcutKey::V if mods.command_or_ctrl() && !ctx.editing && ctx.clipboard_nonempty => {
+            Some(ShortcutAction::Paste)
         }
         ShortcutKey::E if mods.command_or_ctrl() => {
             if mods.shift {
@@ -173,6 +190,7 @@ mod tests {
             editing,
             keyboard_busy: busy,
             has_selection,
+            clipboard_nonempty: true,
         }
     }
 
@@ -212,6 +230,51 @@ mod tests {
             None,
             "editing: arrows belong to the text caret"
         );
+    }
+
+    #[test]
+    fn clipboard_shortcuts_require_selection_and_a_nonempty_clipboard() {
+        assert_eq!(
+            shortcut_action(ShortcutKey::D, mods(true, false), ctx(false, false, true)),
+            Some(ShortcutAction::DuplicateSelection)
+        );
+        assert_eq!(
+            shortcut_action(ShortcutKey::C, mods(true, false), ctx(false, false, true)),
+            Some(ShortcutAction::CopySelection)
+        );
+        assert_eq!(
+            shortcut_action(ShortcutKey::X, mods(true, false), ctx(false, false, true)),
+            Some(ShortcutAction::CutSelection)
+        );
+        assert_eq!(
+            shortcut_action(ShortcutKey::V, mods(true, false), ctx(false, false, true)),
+            Some(ShortcutAction::Paste)
+        );
+        // No selection: copy and cut do nothing...
+        assert_eq!(
+            shortcut_action(ShortcutKey::C, mods(true, false), ctx(false, false, false)),
+            None
+        );
+        // ...but paste works regardless, when the clipboard holds something.
+        assert_eq!(
+            shortcut_action(ShortcutKey::V, mods(true, false), ctx(false, false, false)),
+            Some(ShortcutAction::Paste)
+        );
+        // Empty clipboard: paste is inert.
+        let mut empty = ctx(false, false, true);
+        empty.clipboard_nonempty = false;
+        assert_eq!(
+            shortcut_action(ShortcutKey::V, mods(true, false), empty),
+            None
+        );
+        // Editing suppresses all three.
+        for key in [ShortcutKey::C, ShortcutKey::X, ShortcutKey::V] {
+            assert_eq!(
+                shortcut_action(key, mods(true, false), ctx(true, false, true)),
+                None,
+                "{key:?} fired while editing"
+            );
+        }
     }
 
     #[test]

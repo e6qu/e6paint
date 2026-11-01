@@ -114,6 +114,8 @@ pub struct E6App {
     /// Arrow nudges commit as one undo step once the burst settles.
     nudge_burst: bool,
     last_nudge: Option<Instant>,
+    /// The board clipboard: full element snapshots (cmd/ctrl+C/X/V).
+    clipboard: Vec<Element>,
     /// Screen-reader live region (web): announces board/selection changes.
     #[cfg(target_arch = "wasm32")]
     live_region: Option<web_sys::Element>,
@@ -220,6 +222,7 @@ impl E6App {
             last_inserted: None,
             nudge_burst: false,
             last_nudge: None,
+            clipboard: Vec::new(),
             #[cfg(target_arch = "wasm32")]
             live_region: None,
             #[cfg(target_arch = "wasm32")]
@@ -1646,6 +1649,7 @@ impl E6App {
                 editing: self.editing.is_some(),
                 keyboard_busy: ctx.egui_wants_keyboard_input(),
                 has_selection: !self.selection.is_empty(),
+                clipboard_nonempty: !self.clipboard.is_empty(),
             },
         );
         let Some(action) = action else {
@@ -1699,6 +1703,12 @@ impl E6App {
                 self.last_nudge = Some(Instant::now());
             }
             ShortcutAction::DuplicateSelection => self.duplicate_selection(),
+            ShortcutAction::CopySelection => self.copy_selection(),
+            ShortcutAction::CutSelection => {
+                self.copy_selection();
+                self.delete_selection();
+            }
+            ShortcutAction::Paste => self.paste_clipboard(),
             ShortcutAction::ExportSvg => self.run_hud_command(HudCommand::ExportSvg),
             ShortcutAction::ExportPng => self.run_hud_command(HudCommand::ExportPng),
             ShortcutAction::Undo => {
@@ -1938,6 +1948,72 @@ impl E6App {
             self.doc.commit();
             self.dirty = true;
             self.selection.set(new_ids);
+        }
+    }
+
+    /// Remove every selected element as one undo step.
+    fn delete_selection(&mut self) {
+        let ids: Vec<ElementId> = self.selection.iter().collect();
+        for id in &ids {
+            if let Err(err) = self.doc.remove_element(*id) {
+                log::error!("delete failed: {err}");
+            }
+        }
+        self.doc.commit();
+        self.dirty = true;
+        self.selection.clear();
+    }
+
+    /// Snapshot every selected element into the board clipboard (original
+    /// geometry; the paste offset applies at paste time).
+    fn copy_selection(&mut self) {
+        let elements = self.doc.elements();
+        self.clipboard = elements
+            .iter()
+            .filter(|e| self.selection.contains(e.id))
+            .cloned()
+            .collect();
+    }
+
+    /// Insert clipboard copies offset by 24 pt, select them, and re-offset the
+    /// stored clipboard so repeated pastes cascade.
+    fn paste_clipboard(&mut self) {
+        if self.clipboard.is_empty() {
+            return;
+        }
+        let mut new_ids = Vec::new();
+        for element in &self.clipboard {
+            let mut clone = element.clone();
+            clone.id = ElementId::from_raw(0); // insert mints a fresh id
+            clone.bounds = Aabb::from_min_size(
+                Point::new(clone.bounds.min.x + 24.0, clone.bounds.min.y + 24.0),
+                clone.bounds.size(),
+            );
+            for point in &mut clone.points {
+                point.x += 24.0;
+                point.y += 24.0;
+            }
+            match self.doc.insert_element(&ElementSpec::of(&clone)) {
+                Ok(new_id) => new_ids.push(new_id),
+                Err(err) => log::error!("paste failed: {err}"),
+            }
+        }
+        if new_ids.is_empty() {
+            return;
+        }
+        self.doc.commit();
+        self.dirty = true;
+        self.selection.set(new_ids);
+        // Cascade: the next paste offsets from this one.
+        for element in &mut self.clipboard {
+            element.bounds = Aabb::from_min_size(
+                Point::new(element.bounds.min.x + 24.0, element.bounds.min.y + 24.0),
+                element.bounds.size(),
+            );
+            for point in &mut element.points {
+                point.x += 24.0;
+                point.y += 24.0;
+            }
         }
     }
 
