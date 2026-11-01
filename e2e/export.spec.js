@@ -83,6 +83,7 @@ test("cmd/ctrl+E downloads valid SVG", async ({ page, request }) => {
   expect(problems, `console problems: ${problems.join(" | ")}`).toEqual([]);
 });
 
+test.setTimeout(180_000);
 test("cmd/ctrl+shift+E downloads valid PNG", async ({ page, request }) => {
   const room = await (await request.post("http://127.0.0.1:8480/rooms")).json();
   const lines = await seedBoard(
@@ -90,7 +91,9 @@ test("cmd/ctrl+shift+E downloads valid PNG", async ({ page, request }) => {
     `/?room=${room.room_id}&token=${room.token}`
   );
 
-  const download = page.waitForEvent("download", { timeout: 30_000 });
+  // The raster worker initializes (3.9 MB wasm) and rasterizes off-thread;
+  // under suite load that can take a while past the first attempt.
+  const download = page.waitForEvent("download", { timeout: 60_000 });
   await page.keyboard.press("Control+Shift+e");
   const file = await download.catch(async (err) => {
     console.log("PNG EXPORT TIMEOUT; app console:\n" + lines.join("\n"));

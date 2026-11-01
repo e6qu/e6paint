@@ -19,6 +19,10 @@ pub enum ShortcutKey {
     Y,
     Enter,
     Digit(u8),
+    ArrowLeft,
+    ArrowRight,
+    ArrowUp,
+    ArrowDown,
 }
 
 /// Modifier state for the pressed key.
@@ -46,7 +50,7 @@ pub struct ShortcutContext {
 }
 
 /// A keyboard-triggered board action.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ShortcutAction {
     ExpandMol,
     /// Escape: drop the in-flight draft or marquee; the shell clears the
@@ -55,6 +59,10 @@ pub enum ShortcutAction {
     DeleteSelection,
     RotateSelection,
     DuplicateSelection,
+    NudgeSelection {
+        dx: f32,
+        dy: f32,
+    },
     ExportSvg,
     ExportPng,
     Undo,
@@ -92,6 +100,7 @@ pub fn shortcut_action(
     if ctx.keyboard_busy {
         return None;
     }
+    let step = if mods.shift { 10.0 } else { 1.0 };
 
     match key {
         ShortcutKey::Delete | ShortcutKey::Backspace if ctx.has_selection && !ctx.editing => {
@@ -131,6 +140,18 @@ pub fn shortcut_action(
             };
             Some(ShortcutAction::ApplyTool(tool))
         }
+        ShortcutKey::ArrowLeft if ctx.has_selection && !ctx.editing => {
+            Some(ShortcutAction::NudgeSelection { dx: -step, dy: 0.0 })
+        }
+        ShortcutKey::ArrowRight if ctx.has_selection && !ctx.editing => {
+            Some(ShortcutAction::NudgeSelection { dx: step, dy: 0.0 })
+        }
+        ShortcutKey::ArrowUp if ctx.has_selection && !ctx.editing => {
+            Some(ShortcutAction::NudgeSelection { dx: 0.0, dy: -step })
+        }
+        ShortcutKey::ArrowDown if ctx.has_selection && !ctx.editing => {
+            Some(ShortcutAction::NudgeSelection { dx: 0.0, dy: step })
+        }
         _ => None,
     }
 }
@@ -153,6 +174,44 @@ mod tests {
             keyboard_busy: busy,
             has_selection,
         }
+    }
+
+    #[test]
+    fn arrows_nudge_the_selection_and_shift_steps_ten_pixels() {
+        assert_eq!(
+            shortcut_action(
+                ShortcutKey::ArrowLeft,
+                mods(false, false),
+                ctx(false, false, true)
+            ),
+            Some(ShortcutAction::NudgeSelection { dx: -1.0, dy: 0.0 })
+        );
+        assert_eq!(
+            shortcut_action(
+                ShortcutKey::ArrowDown,
+                mods(false, true),
+                ctx(false, false, true)
+            ),
+            Some(ShortcutAction::NudgeSelection { dx: 0.0, dy: 10.0 })
+        );
+        assert_eq!(
+            shortcut_action(
+                ShortcutKey::ArrowUp,
+                mods(false, false),
+                ctx(false, false, false)
+            ),
+            None,
+            "no selection: nothing to nudge"
+        );
+        assert_eq!(
+            shortcut_action(
+                ShortcutKey::ArrowUp,
+                mods(false, false),
+                ctx(true, false, true)
+            ),
+            None,
+            "editing: arrows belong to the text caret"
+        );
     }
 
     #[test]

@@ -111,6 +111,9 @@ pub struct E6App {
     selection: Selection,
     gesture: e6_editor::gesture::GestureState,
     last_inserted: Option<ElementId>,
+    /// Arrow nudges commit as one undo step once the burst settles.
+    nudge_burst: bool,
+    last_nudge: Option<Instant>,
     /// Screen-reader live region (web): announces board/selection changes.
     #[cfg(target_arch = "wasm32")]
     live_region: Option<web_sys::Element>,
@@ -215,6 +218,8 @@ impl E6App {
             selection: Selection::new(),
             gesture: e6_editor::gesture::GestureState::default(),
             last_inserted: None,
+            nudge_burst: false,
+            last_nudge: None,
             #[cfg(target_arch = "wasm32")]
             live_region: None,
             #[cfg(target_arch = "wasm32")]
@@ -1679,6 +1684,20 @@ impl E6App {
                 self.selection.clear();
             }
             ShortcutAction::RotateSelection => self.rotate_selection(15_f32.to_radians()),
+            ShortcutAction::NudgeSelection { dx, dy } => {
+                // Screen pixels -> world units; the burst commits as one
+                // undo step after the arrows settle.
+                let wx = dx / self.camera.zoom.max(0.01);
+                let wy = dy / self.camera.zoom.max(0.01);
+                for id in self.selection.iter() {
+                    if let Err(err) = self.doc.translate(id, wx, wy) {
+                        log::error!("nudge failed: {err}");
+                    }
+                }
+                self.dirty = true;
+                self.nudge_burst = true;
+                self.last_nudge = Some(Instant::now());
+            }
             ShortcutAction::DuplicateSelection => self.duplicate_selection(),
             ShortcutAction::ExportSvg => self.run_hud_command(HudCommand::ExportSvg),
             ShortcutAction::ExportPng => self.run_hud_command(HudCommand::ExportPng),
@@ -2614,6 +2633,17 @@ impl eframe::App for E6App {
         self.hud.selected_elements = self.selection.len();
         #[cfg(target_arch = "wasm32")]
         self.update_screen_reader_announcement();
+
+        // Arrow-nudge bursts commit as one undo step once the keys settle.
+        if self.nudge_burst
+            && self
+                .last_nudge
+                .is_some_and(|at| now.duration_since(at) >= Duration::from_millis(400))
+        {
+            self.doc.commit();
+            self.dirty = true;
+            self.nudge_burst = false;
+        }
 
         // Present mode owns the input: advance the tween, navigate, skip editing.
         if self.present_step(ui.ctx(), viewport) {
