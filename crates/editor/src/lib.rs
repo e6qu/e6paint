@@ -7,6 +7,7 @@
 pub mod align;
 pub mod gesture;
 pub mod resize;
+pub mod shortcut;
 
 use std::collections::BTreeSet;
 

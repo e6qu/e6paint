@@ -84,13 +84,19 @@ pub fn draw_layers_content(
                     label.truncate(24);
                 }
                 if row
-                    .selectable_label(selection.contains(id), label)
+                    .selectable_label(selection.contains(id), label.clone())
                     .clicked()
                 {
                     action = Some(PanelAction::Select(id));
                 }
                 let toggle = if element.hidden { "Show" } else { "Hide" };
-                if row.small_button(toggle).clicked() {
+                // Screen readers hear one "Hide" button per row; carry the
+                // element context into the button's accessible name.
+                let toggle_response = row.small_button(toggle);
+                toggle_response.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::Role::Button, true, format!("{toggle} {label}"))
+                });
+                if toggle_response.clicked() {
                     action = Some(PanelAction::ToggleHidden(id));
                 }
             });

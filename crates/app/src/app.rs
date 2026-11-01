@@ -1586,144 +1586,119 @@ impl E6App {
     }
 
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
-        let z = Self::key_pressed_with_modifiers(ctx, egui::Key::Z);
-        let y = Self::key_pressed_with_modifiers(ctx, egui::Key::Y);
-        let d = Self::key_pressed_with_modifiers(ctx, egui::Key::D);
-        let e = Self::key_pressed_with_modifiers(ctx, egui::Key::E);
-        let enter = Self::key_pressed_with_modifiers(ctx, egui::Key::Enter);
-        let delete = ctx.input(|input| {
-            input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace)
-        });
-        let escape = ctx.input(|input| input.key_pressed(egui::Key::Escape));
+        // Read per-event key state (see key_pressed_with_modifiers): the
+        // global queue is cleared by text-agent focus churn on room-first
+        // pages, so shortcuts poll each key individually.
+        let tracked: [(egui::Key, e6_editor::shortcut::ShortcutKey); 9] = [
+            (egui::Key::Escape, e6_editor::shortcut::ShortcutKey::Escape),
+            (egui::Key::Delete, e6_editor::shortcut::ShortcutKey::Delete),
+            (
+                egui::Key::Backspace,
+                e6_editor::shortcut::ShortcutKey::Backspace,
+            ),
+            (egui::Key::R, e6_editor::shortcut::ShortcutKey::R),
+            (egui::Key::D, e6_editor::shortcut::ShortcutKey::D),
+            (egui::Key::E, e6_editor::shortcut::ShortcutKey::E),
+            (egui::Key::Z, e6_editor::shortcut::ShortcutKey::Z),
+            (egui::Key::Y, e6_editor::shortcut::ShortcutKey::Y),
+            (egui::Key::Enter, e6_editor::shortcut::ShortcutKey::Enter),
+        ];
+        let digits: [(egui::Key, u8); 9] = [
+            (egui::Key::Num1, 1),
+            (egui::Key::Num2, 2),
+            (egui::Key::Num3, 3),
+            (egui::Key::Num4, 4),
+            (egui::Key::Num5, 5),
+            (egui::Key::Num6, 6),
+            (egui::Key::Num7, 7),
+            (egui::Key::Num8, 8),
+            (egui::Key::Num9, 9),
+        ];
 
-        if escape {
-            // While editing, the inline editor owns Escape (it applies its buffer
-            // and closes in draw_text_editor, so queued keystrokes survive).
-            if self.editing.is_some() {
-                return;
-            }
-            let commands = e6_editor::gesture::cancel(&mut self.gesture);
-            let consumed = !commands.is_empty();
-            for command in commands {
-                self.apply_command(command);
-            }
-            if consumed {
-                // draft or marquee discarded
-            } else {
-                self.selection.clear();
-            }
+        // The pressed key this frame, in board precedence order.
+        let pressed = tracked
+            .into_iter()
+            .chain(
+                digits
+                    .into_iter()
+                    .map(|(key, d)| (key, e6_editor::shortcut::ShortcutKey::Digit(d))),
+            )
+            .find_map(|(egui_key, shortcut_key)| {
+                Self::key_pressed_with_modifiers(ctx, egui_key).map(|mods| (shortcut_key, mods))
+            });
+
+        let Some((key, mods)) = pressed else {
             return;
-        }
-
-        // Everything below acts on the board. A focused text field (the inline
-        // editor or the mol code panel) owns the keyboard: its Delete, cmd/ctrl+Z/Y
-        // and digits must edit text, never the board.
-        let keyboard_busy = ctx.egui_wants_keyboard_input();
-
-        // cmd/ctrl+Enter expands the mol panel — the standard "render the source"
-        // gesture for diagram tools. It works even while typing in the panel, so
-        // this check sits above the keyboard_busy guard; canvas text editing is
-        // left via Escape first anyway.
-        if let Some(modifiers) = enter
-            && (modifiers.command || modifiers.ctrl)
-        {
-            self.expand_mol();
+        };
+        let action = e6_editor::shortcut::shortcut_action(
+            key,
+            e6_editor::shortcut::ShortcutMods {
+                command: mods.command,
+                ctrl: mods.ctrl,
+                shift: mods.shift,
+            },
+            e6_editor::shortcut::ShortcutContext {
+                editing: self.editing.is_some(),
+                keyboard_busy: ctx.egui_wants_keyboard_input(),
+                has_selection: !self.selection.is_empty(),
+            },
+        );
+        let Some(action) = action else {
             return;
-        }
-
-        if keyboard_busy {
-            return;
-        }
-
-        if delete && self.editing.is_none() {
-            let ids: Vec<ElementId> = self.selection.iter().collect();
-            if ids.is_empty() {
-                return;
-            }
-            for id in &ids {
-                if let Err(err) = self.doc.remove_element(*id) {
-                    log::error!("delete failed: {err}");
-                }
-            }
-            self.doc.commit();
-            self.dirty = true;
-            self.selection.clear();
-            return;
-        }
-
-        // R rotates the selection 15° clockwise (Miro-style increments).
-        if !self.selection.is_empty()
-            && Self::key_pressed_with_modifiers(ctx, egui::Key::R).is_some()
-        {
-            self.rotate_selection(15_f32.to_radians());
-        }
-
-        // cmd/ctrl+D duplicates the selection, offset by 24 pt.
-        if let Some(modifiers) = d
-            && (modifiers.command || modifiers.ctrl)
-            && !self.selection.is_empty()
-        {
-            self.duplicate_selection();
-            return;
-        }
-
-        // cmd/ctrl+E exports SVG; add shift for PNG. Exports must not fire while
-        // a text field owns the keyboard.
-        if let Some(modifiers) = e
-            && (modifiers.command || modifiers.ctrl)
-        {
-            let command = if modifiers.shift {
-                HudCommand::ExportPng
-            } else {
-                HudCommand::ExportSvg
-            };
-            self.run_hud_command(command);
-            return;
-        }
-
-        let undo_modifiers = z
-            .or(y)
-            .filter(|modifiers| modifiers.command || modifiers.ctrl);
-        if let Some(modifiers) = undo_modifiers {
-            let outcome = if modifiers.shift {
-                self.doc.redo()
-            } else {
-                self.doc.undo()
-            };
-            if let Err(err) = outcome {
-                log::error!("undo/redo failed: {err}");
-            }
-            self.selection.clear();
-            self.dirty = true;
-        }
-
-        // Digits 1–9 pick tools in tool-bar order (the bar shows the digit on hover).
-        // keyboard_busy is already excluded above; the editing guard keeps the
-        // shortcut inert even if the editor ever loses focus mid-edit. Reads
-        // per-event state (see key_pressed_with_modifiers) — the global queue is
-        // cleared by text-agent focus churn on room-first pages.
-        if self.editing.is_none() {
-            const DIGIT_KEYS: [egui::Key; 9] = [
-                egui::Key::Num1,
-                egui::Key::Num2,
-                egui::Key::Num3,
-                egui::Key::Num4,
-                egui::Key::Num5,
-                egui::Key::Num6,
-                egui::Key::Num7,
-                egui::Key::Num8,
-                egui::Key::Num9,
-            ];
-            for (index, key) in DIGIT_KEYS.iter().enumerate() {
-                if Self::key_pressed_with_modifiers(ctx, *key).is_some()
-                    && let Some(tool) = e6_ui::tool_for_digit(index as u8 + 1)
-                {
-                    self.apply_tool(tool);
-                }
-            }
-        }
+        };
+        self.run_shortcut_action(action);
     }
 
+    /// Execute a keyboard action resolved by the pure shortcut mapping.
+    fn run_shortcut_action(&mut self, action: e6_editor::shortcut::ShortcutAction) {
+        use e6_editor::shortcut::ShortcutAction;
+        match action {
+            ShortcutAction::ExpandMol => self.expand_mol(),
+            ShortcutAction::CancelGesture => {
+                // While editing, the inline editor owns Escape (it applies its
+                // buffer and closes in draw_text_editor, so queued keystrokes
+                // survive); the pure mapping defers when editing is open.
+                let commands = e6_editor::gesture::cancel(&mut self.gesture);
+                let consumed = !commands.is_empty();
+                for command in commands {
+                    self.apply_command(command);
+                }
+                if !consumed {
+                    self.selection.clear();
+                }
+            }
+            ShortcutAction::DeleteSelection => {
+                let ids: Vec<ElementId> = self.selection.iter().collect();
+                for id in &ids {
+                    if let Err(err) = self.doc.remove_element(*id) {
+                        log::error!("delete failed: {err}");
+                    }
+                }
+                self.doc.commit();
+                self.dirty = true;
+                self.selection.clear();
+            }
+            ShortcutAction::RotateSelection => self.rotate_selection(15_f32.to_radians()),
+            ShortcutAction::DuplicateSelection => self.duplicate_selection(),
+            ShortcutAction::ExportSvg => self.run_hud_command(HudCommand::ExportSvg),
+            ShortcutAction::ExportPng => self.run_hud_command(HudCommand::ExportPng),
+            ShortcutAction::Undo => {
+                if let Err(err) = self.doc.undo() {
+                    log::error!("undo failed: {err}");
+                }
+                self.selection.clear();
+                self.dirty = true;
+            }
+            ShortcutAction::Redo => {
+                if let Err(err) = self.doc.redo() {
+                    log::error!("redo failed: {err}");
+                }
+                self.selection.clear();
+                self.dirty = true;
+            }
+            ShortcutAction::ApplyTool(tool) => self.apply_tool(tool),
+        }
+    }
     /// Switch tools the way a tool-bar click does: leave text editing, drop any
     /// in-flight draft and marquee.
     fn apply_tool(&mut self, tool: Tool) {
