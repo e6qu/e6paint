@@ -939,8 +939,15 @@ mod tests {
 /// `resvg`. Returns encoded PNG bytes.
 pub fn export_png(elements: &[Element], title: &str, scale: u32) -> Result<Vec<u8>, String> {
     let svg = export_svg(elements, title);
+    rasterize_svg_png(&svg, scale)
+}
+
+/// Rasterize an exported-board SVG into PNG bytes. Pure and synchronous: the
+/// wasm shell runs this inside a dedicated worker so dense boards never
+/// freeze the page.
+pub fn rasterize_svg_png(svg: &str, scale: u32) -> Result<Vec<u8>, String> {
     let options = resvg::usvg::Options::default();
-    let tree = resvg::usvg::Tree::from_str(&svg, &options).map_err(|err| err.to_string())?;
+    let tree = resvg::usvg::Tree::from_str(svg, &options).map_err(|err| err.to_string())?;
     let size = tree.size();
     let scale_f = scale as f32;
     let width = ((size.width() * scale_f) as u32).max(1);

@@ -7,6 +7,9 @@ default: check
 install-tools:
 	rustup target add wasm32-unknown-unknown
 	cargo install --locked trunk
+	# The PNG raster worker's bindgen step needs this CLI, pinned to the
+	# workspace wasm-bindgen crate version.
+	cargo install --locked wasm-bindgen-cli --version 0.2.129
 
 fmt:
 	cargo fmt --all

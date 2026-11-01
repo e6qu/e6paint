@@ -29,8 +29,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Clippy for the wasm target (wasm-only cfg code is invisible to host clippy)
         run: cargo clippy -p e6-app --target wasm32-unknown-unknown -- -D warnings
-      - name: Install trunk
-        run: cargo install --locked trunk
+      - name: Install trunk and the wasm-bindgen CLI (the raster worker)
+        run: |
+          cargo install --locked trunk
+          cargo install --locked wasm-bindgen-cli --version 0.2.129
       - name: Build web app
         run: trunk build --release
         working-directory: crates/app

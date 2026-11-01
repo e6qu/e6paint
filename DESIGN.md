@@ -87,11 +87,12 @@ review + a CI `cargo-modules`/`cargo-deny` check where practical.
 | `doc` | core | The Loro mapping: containers ↔ scene operations, transactions, undo integration, snapshot import/export, JSON dump |
 | `dsl` | core | Native DSL lexer/parser (spanned errors, recovery), printer, Mermaid→DSL translators (family by family), DOT importer |
 | `layout` | core | Pure layout engines: layered (sugiyama), tree/radial, lane/slab (sequence, gitGraph, timeline), grid (block, gantt), chart (pie), orthogonal router; deterministic, seeded, property-tested |
-| `render` | core | Scene → cached Vello display list: styles, sketch-mode stroke roughening (seeded, cache-only — never stored), text shaping cache hooks, SVG writer, LOD tier application, viewport culling |
+| `render` | core | Scene → cached Vello display list: styles, sketch-mode stroke roughening (seeded, cache-only — never stored), text shaping cache hooks, SVG writer, SVG→PNG rasterization (resvg), LOD tier application, viewport culling |
 | `editor` | core | Tools state machine (select/pen/shape/connector/text/sticky/image/frame/pan), selection model, align/distribute, group ops, present-mode sequencer, clipboard model |
 | `collab` | core+shell-traits | Sync glue: Loro update batching/throttling, presence model, reconnect/backoff policy, room token handling (transport injected via trait) |
 | `ui` | shell | egui panels: toolbar, outline, layers, inspector, library, dialogs, menus, theme (light/dark/sketch preview) |
-| `app` | shell, wasm | eframe app: shared wgpu device, Vello pass + egui pass composition, OPFS persistence, worker offload (layout/import), web entry |
+| `app` | shell, wasm | eframe app: shared wgpu device, Vello pass + egui pass composition, OPFS persistence, web entry |
+| `render-worker` | shell, wasm | dedicated PNG rasterization worker (resvg off the main thread) |
 | `relay` | shell, native | axum server: WS rooms, token auth, SQLite (rooms/snapshots/GC), rate limits, single-binary deploy + Dockerfile |
 
 Build/dev tooling: `trunk` for the web app, `wasm-pack`-compatible wasm32 target, `cargo` + a
@@ -217,8 +218,10 @@ selections, board load ≤ 1.5s warm.
 - Culling via the quadtree; LOD tiers as in §6; fragment caching; shaping cache.
 - Layout and Mermaid/DOT import and expansion run on the main thread in v1.0
   (measured cheap: the 10k-board display rebuild is ~0.29 ms; imports are
-  user-triggered and small). Moving them to a Web Worker is parked in §14 — the
-  postMessage design needs no shared memory, so no COOP/COEP headers either way.
+  user-triggered and small). PNG export rasterization runs in a dedicated wasm
+  worker (§14, post-v1.0); layout/import/expansion move there only when latency
+  shows up in practice. The postMessage design needs no shared memory, so no
+  COOP/COEP headers either way.
 - WASM size budget: ≤ 5 MB gz total; measured in CI; fonts subset, allocator decision
   deferred to measurement (verify-in-spike). Walking-skeleton measurement (vello 0.11 +
   wgpu 30 + eframe 0.37, release + wasm-opt): **6.88 MB raw / 2.50 MB gz** — budget met
@@ -287,10 +290,16 @@ To be canonized in `AGENTS.md` at M0; summary:
 - Official demo relay hosting (Fly.io vs VPS) — parked; `cargo run -p e6-relay` and
   `E6PAINT_RELAY_ADDR` are the supported story for v1.0.
 - Accessibility scope for v1.0 — **Resolved (M8):** keyboard completeness (tool shortcuts,
-  undo/redo, Esc/Enter editing) plus a labeled canvas node (`WidgetInfo`/`Role::Canvas`);
-  full screen-reader coverage of canvas content is post-v1.0.
+  undo/redo, Esc/Enter editing) plus a labeled canvas node (`WidgetInfo`/`Role::Canvas`).
+  **Extended (post-v1.0):** a hidden aria-live region announces board/selection
+  changes on web (`E6App::board_announcement`); per-element canvas coverage
+  remains post-v1.0.
 - Web Worker offload for layout/import/expansion (§10) — did not ship in v1.0
   (main thread measured cheap); park until import latency shows up in practice.
+  **Partially resolved (post-v1.0):** PNG rasterization moved to a dedicated
+  wasm worker (`crates/render-worker`, trunk pre-build hook) — dense boards
+  export without freezing the page. Layout/import/expansion stay on the main
+  thread until latency shows up.
 - Reconnect e2e — Playwright's offline emulation cannot sever an established
   loopback WebSocket, so the pong-timeout reconnect cannot be triggered in
   browser tests; the detection logic is unit-tested (collab::pong_timed_out)

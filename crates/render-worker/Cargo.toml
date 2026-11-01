@@ -1,0 +1,19 @@
+[package]
+name = "render-worker"
+description = "PNG rasterization worker: resvg in a dedicated wasm worker so dense boards never freeze the page"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+e6-render = { path = "../render" }
+wasm-bindgen.workspace = true
+
+[lints]
+workspace = true

@@ -94,6 +94,7 @@ pub mod native {
 #[cfg(target_arch = "wasm32")]
 pub mod web {
     use wasm_bindgen::JsCast;
+    use wasm_bindgen::prelude::Closure;
     use wasm_bindgen_futures::JsFuture;
 
     const BOARD_FILE: &str = "board.e6p";
@@ -180,6 +181,54 @@ pub mod web {
                 log::error!("clipboard write failed: {err:?}");
             }
         });
+    }
+
+    /// The dedicated PNG rasterization worker (built by the trunk pre-build
+    /// hook into `worker/`). The reply handler downloads the finished PNG
+    /// under the fixed export name, or surfaces worker errors loudly.
+    pub fn png_worker() -> Result<web_sys::Worker, String> {
+        let worker = web_sys::Worker::new("worker/render_worker_entry.js")
+            .map_err(|err| describe_js_error("png worker", err))?;
+        let on_message = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(
+            move |event: web_sys::MessageEvent| {
+                let data: wasm_bindgen::JsValue = event.data();
+                let field = |name: &str| {
+                    js_sys::Reflect::get(&data, &js_sys::JsString::from(name).into())
+                        .unwrap_or(wasm_bindgen::JsValue::UNDEFINED)
+                };
+                let error = field("error");
+                if error.is_string() {
+                    log::error!(
+                        "png export failed in the raster worker: {}",
+                        error.as_string().unwrap_or_default()
+                    );
+                    return;
+                }
+                match field("png").dyn_into::<js_sys::Uint8Array>() {
+                    Ok(png) => {
+                        let bytes = png.to_vec();
+                        log::info!("png export: raster worker produced {} bytes", bytes.len());
+                        if let Err(err) = download_bytes("e6paint-board.png", "image/png", &bytes) {
+                            log::error!("PNG download failed: {err}");
+                        }
+                    }
+                    Err(err) => log::error!("png export: unexpected reply {err:?}"),
+                }
+            },
+        );
+        worker.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+        on_message.forget();
+        let on_error =
+            Closure::<dyn FnMut(web_sys::ErrorEvent)>::new(|event: web_sys::ErrorEvent| {
+                log::error!(
+                    "png raster worker failed: {} ({})",
+                    event.message(),
+                    event.filename()
+                );
+            });
+        worker.set_onerror(Some(on_error.as_ref().unchecked_ref()));
+        on_error.forget();
+        Ok(worker)
     }
 
     /// Hand binary bytes to the user via the browser's download flow.

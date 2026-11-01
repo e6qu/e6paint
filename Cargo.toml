@@ -11,6 +11,7 @@ members = [
     "crates/ui",
     "crates/app",
     "crates/relay",
+    "crates/render-worker",
 ]
 
 [workspace.package]
@@ -91,6 +92,8 @@ web-sys = { version = "0.3", features = [
     "Url",
     "WebSocket",
     "Window",
+    "Worker",
+    "ErrorEvent",
 ] }
 console_error_panic_hook = "0.1"
 

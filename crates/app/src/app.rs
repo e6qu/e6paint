@@ -117,6 +117,9 @@ pub struct E6App {
     /// The last announced summary; updates only on change.
     #[cfg(target_arch = "wasm32")]
     announced: String,
+    /// The dedicated PNG rasterization worker (created lazily on first export).
+    #[cfg(target_arch = "wasm32")]
+    png_worker: Option<web_sys::Worker>,
     editing: Option<ElementId>,
     editing_focused: bool,
     /// Present mode: index into [`BoardDoc::frames`].
@@ -216,6 +219,8 @@ impl E6App {
             live_region: None,
             #[cfg(target_arch = "wasm32")]
             announced: String::new(),
+            #[cfg(target_arch = "wasm32")]
+            png_worker: None,
             editing: None,
             editing_focused: false,
             present: None,
@@ -1451,19 +1456,21 @@ impl E6App {
     }
 
     /// Render the board to PNG and hand it to the platform (download / file).
+    /// Native rasterizes synchronously; web sends the SVG to the dedicated
+    /// raster worker so dense boards never freeze the page.
     fn export_png(&mut self) {
-        let elements = self.doc.elements();
-        let started = Instant::now();
-        match e6_render::export_png(&elements, &self.doc.title(), 2) {
-            Ok(bytes) => {
-                log::info!(
-                    "png export: {} elements to {} bytes in {:.0} ms",
-                    elements.len(),
-                    bytes.len(),
-                    started.elapsed().as_millis()
-                );
-                #[cfg(not(target_arch = "wasm32"))]
-                {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let elements = self.doc.elements();
+            let started = Instant::now();
+            match e6_render::export_png(&elements, &self.doc.title(), 2) {
+                Ok(bytes) => {
+                    log::info!(
+                        "png export: {} elements to {} bytes in {:.0} ms",
+                        elements.len(),
+                        bytes.len(),
+                        started.elapsed().as_millis()
+                    );
                     let mut path = storage::native::json_path();
                     path.set_extension("png");
                     if let Err(err) = storage::native::save(&path, &bytes) {
@@ -1472,17 +1479,49 @@ impl E6App {
                         log::info!("board exported to {}", path.display());
                     }
                 }
-                #[cfg(target_arch = "wasm32")]
-                if let Err(err) =
-                    storage::web::download_bytes("e6paint-board.png", "image/png", &bytes)
-                {
-                    log::error!("PNG download failed: {err}");
+                Err(err) => log::error!("PNG export failed: {err}"),
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let elements = self.doc.elements();
+            let svg = e6_render::export_svg(&elements, &self.doc.title());
+            log::info!(
+                "png export: {} elements queued in the raster worker",
+                elements.len()
+            );
+            if self.png_worker.is_none() {
+                match storage::web::png_worker() {
+                    Ok(worker) => self.png_worker = Some(worker),
+                    Err(err) => {
+                        log::error!("png export unavailable: {err}");
+                        return;
+                    }
                 }
             }
-            Err(err) => self
-                .code_panel
-                .errors
-                .push(format!("PNG export failed: {err}")),
+            let Some(worker) = self.png_worker.as_ref() else {
+                return;
+            };
+            let message = js_sys::Object::new();
+            if let (Ok(svg), Ok(scale)) = (
+                js_sys::Reflect::set(
+                    &message,
+                    &js_sys::JsString::from("svg").into(),
+                    &js_sys::JsString::from(svg).into(),
+                ),
+                js_sys::Reflect::set(
+                    &message,
+                    &js_sys::JsString::from("scale").into(),
+                    &js_sys::Number::from(2).into(),
+                ),
+            ) {
+                let _ = (svg, scale);
+                if let Err(err) = worker.post_message(&message) {
+                    log::error!("png export dispatch failed: {err:?}");
+                }
+            } else {
+                log::error!("png export: failed to build the worker message");
+            }
         }
     }
 

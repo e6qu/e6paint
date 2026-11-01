@@ -1,3 +1,17 @@
 [build]
 target = "index.html"
 dist = "dist"
+
+# The pre_build hook writes into static/worker; without this ignore the
+# watcher sees its own output and rebuilds forever.
+[watch]
+# The pre_build hook writes into target/ (render-worker release build) and
+# static/worker (bindgen output): both feed the watcher in a loop.
+ignore = ["target", "static/worker"]
+
+# The PNG rasterization worker: resvg runs off the main thread so dense
+# boards export without freezing the page. Outputs land in static/worker/
+# (gitignored, generated) and are served verbatim with the app.
+[[hooks]]
+stage = "pre_build"
+command = "./build_worker.sh"
