@@ -2040,6 +2040,28 @@ impl E6App {
         }
     }
 
+    /// Alt/Option+drag: clone the element under the press point, select the
+    /// copy, and leave it to the drag to move. The insert commits immediately
+    /// (its own undo step, matching duplicate), and the copy is painted above
+    /// the original so it becomes the topmost hit.
+    fn duplicate_at(&mut self, world: Point) -> bool {
+        let Some(element) = self.topmost_at(world) else {
+            return false;
+        };
+        match self.doc.insert_element(&ElementSpec::of(&element)) {
+            Ok(new_id) => {
+                self.doc.commit();
+                self.dirty = true;
+                self.selection.set([new_id]);
+                true
+            }
+            Err(err) => {
+                log::error!("alt-duplicate failed: {err}");
+                false
+            }
+        }
+    }
+
     /// Select gestures are suppressed while space is held: space+drag pans (the
     /// Miro convention), regardless of the active tool.
     fn space_held(&self, response: &egui::Response) -> bool {
@@ -2073,6 +2095,17 @@ impl E6App {
         if self.space_held(response) {
             response.ctx.set_cursor_icon(egui::CursorIcon::Grab);
             return;
+        }
+        // Alt/Option + drag duplicates the grabbed element: the copy is
+        // created at drag start (egui only fires drag_started after the
+        // pointer commits to a drag, so a plain alt+click never duplicates)
+        // and the press below then drags the copy.
+        let alt_held = response.ctx.input(|input| input.modifiers.alt);
+        if response.drag_started()
+            && alt_held
+            && let Some(at) = self.world_at_press(response, pixels_per_point)
+        {
+            self.duplicate_at(at);
         }
         let mut events: Vec<e6_editor::gesture::PointerEvent> = Vec::new();
         if response.double_clicked()
