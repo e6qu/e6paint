@@ -50,7 +50,7 @@ js-sys = "0.3"
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
 
 # Relay persistence + realtime (M5): bundled SQLite needs no system libs.
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
 proptest = "1"
 kittest = "0.5"
