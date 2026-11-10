@@ -47,7 +47,7 @@ tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 dirs = "7"
 js-sys = "0.3"
-rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
+rfd = { version = "0.18", default-features = false, features = ["xdg-portal"] }
 
 # Relay persistence + realtime (M5): bundled SQLite needs no system libs.
 rusqlite = { version = "0.40", features = ["bundled"] }
